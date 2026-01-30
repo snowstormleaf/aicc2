@@ -1,8 +1,4 @@
-# Welcome to your Lovable project
-
-## Project info
-
-**URL**: https://lovable.dev/projects/5c753ab8-31e8-42cd-b6b8-19aaebcc836b
+# AI Customer Clinic 2
 
 ## How can I edit this code?
 
@@ -53,12 +49,6 @@ This project is built with:
 - React
 - shadcn-ui
 - Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/5c753ab8-31e8-42cd-b6b8-19aaebcc836b) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
 
 Yes, you can!
 
