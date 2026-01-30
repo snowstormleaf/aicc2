@@ -10,6 +10,25 @@ interface ResultsVisualizationProps {
   results: Map<string, PerceivedValue[]>;
 }
 
+interface ChartDatum {
+  feature: string;
+  materialCost: number;
+  perceivedValue: number;
+  netScore: number;
+  persona: string;
+  featureName: string;
+  featureId: string;
+}
+
+interface TooltipPayloadItem {
+  payload: ChartDatum;
+}
+
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: TooltipPayloadItem[];
+}
+
 const personas = {
   'fleet-manager': 'Fleet Manager',
   'small-business-owner': 'Small Business Owner', 
@@ -35,7 +54,7 @@ export const ResultsVisualization = ({ results }: ResultsVisualizationProps) => 
   }
 
   const personas = Array.from(results.keys());
-  const allData = [];
+  const allData: ChartDatum[] = [];
   
   // Prepare data for scatter plot
   for (const [persona, perceivedValues] of results.entries()) {
@@ -46,6 +65,8 @@ export const ResultsVisualization = ({ results }: ResultsVisualizationProps) => 
         perceivedValue: result.perceivedValue,
         netScore: result.netScore,
         persona: persona,
+        featureName: result.featureName,
+        featureId: result.featureId,
       });
     }
   }
@@ -101,7 +122,7 @@ export const ResultsVisualization = ({ results }: ResultsVisualizationProps) => 
     window.URL.revokeObjectURL(url);
   };
 
-  const CustomTooltip = ({ active, payload }: any) => {
+  const CustomTooltip = ({ active, payload }: CustomTooltipProps) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload;
       const ratio = data.perceivedValue / data.materialCost;
