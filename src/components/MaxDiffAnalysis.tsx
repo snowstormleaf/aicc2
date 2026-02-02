@@ -6,8 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { Brain, TrendingUp, DollarSign, CheckCircle, AlertCircle } from "lucide-react";
 import { MaxDiffEngine, PerceivedValue } from "@/lib/maxdiff-engine";
 import { LLMClient } from "@/lib/llm-client";
-import { personas as personaData, vehicles as vehicleData } from "@/data/personas";
+import { vehicles as vehicleData } from "@/data/personas";
+import { usePersonas } from "@/personas/store";
 import { ApiKeyInput } from "./ApiKeyInput";
+
+const { personasById, getPersonaName } = usePersonas();
 
 interface Feature {
   id: string;
@@ -22,12 +25,6 @@ interface MaxDiffAnalysisProps {
   selectedVehicle: string;
   onAnalysisComplete: (results: Map<string, PerceivedValue[]>) => void;
 }
-
-const personaNames = {
-  'fleet-manager': 'Fleet Manager',
-  'small-business-owner': 'Small Business Owner', 
-  'individual-buyer': 'Individual Buyer'
-};
 
 const vehicleNames = {
   'ford-transit-custom': 'Ford Transit Custom',
@@ -134,7 +131,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
       const voucherBounds = await llmClient.recommendVoucherBounds(featureDescriptions);
       
       for (const personaName of selectedPersonas) {
-        setCurrentPersona(personaName);
+        setCurrentPersona(getPersonaName(personaName));
         
         // Check cache first
         const cacheKey = `maxdiff_${selectedVehicle}_${personaName}`;
@@ -151,7 +148,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
           }
         }
 
-        const persona = personaData[personaName as keyof typeof personaData];
+        const persona = personasById[personaName];
         const vehicle = vehicleData[selectedVehicle as keyof typeof vehicleData];
         
         if (!persona || !vehicle) {
@@ -292,7 +289,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
               <div className="mt-1">
                 {selectedPersonas.map(persona => (
                   <Badge key={persona} variant="outline" className="mr-1 mb-1">
-                    {personaNames[persona as keyof typeof personaNames]}
+                    {getPersonaName(persona)}
                   </Badge>
                 ))}
               </div>
