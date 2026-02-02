@@ -10,8 +10,6 @@ import { vehicles as vehicleData } from "@/data/personas";
 import { usePersonas } from "@/personas/store";
 import { ApiKeyInput } from "./ApiKeyInput";
 
-const { personasById, getPersonaName } = usePersonas();
-
 interface Feature {
   id: string;
   name: string;
@@ -44,6 +42,8 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
   const [elapsedTime, setElapsedTime] = useState(0);
   const [eta, setEta] = useState(0);
   const [useCache, setUseCache] = useState(false);
+
+  const { personasById, getPersonaName } = usePersonas();
 
   useEffect(() => {
     const storedKey = localStorage.getItem('openai_api_key');
