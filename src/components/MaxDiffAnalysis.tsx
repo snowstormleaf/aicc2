@@ -6,8 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Brain, TrendingUp, DollarSign, CheckCircle, AlertCircle } from "lucide-react";
 import { MaxDiffEngine, PerceivedValue } from "@/lib/maxdiff-engine";
 import { LLMClient } from "@/lib/llm-client";
-import { vehicles as vehicleData } from "@/data/personas";
 import { usePersonas } from "@/personas/store";
+import { useVehicles } from "@/vehicles/store";
 import { ApiKeyInput } from "./ApiKeyInput";
 
 interface Feature {
@@ -24,13 +24,6 @@ interface MaxDiffAnalysisProps {
   onAnalysisComplete: (results: Map<string, PerceivedValue[]>) => void;
 }
 
-const vehicleNames = {
-  'ford-transit-custom': 'Ford Transit Custom',
-  'ford-ranger': 'Ford Ranger',
-  'ford-kuga': 'Ford Kuga',
-  'ford-tourneo': 'Ford Tourneo'
-};
-
 export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, onAnalysisComplete }: MaxDiffAnalysisProps) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -44,6 +37,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
   const [useCache, setUseCache] = useState(false);
 
   const { personasById, getPersonaName } = usePersonas();
+  const { vehiclesById } = useVehicles();
 
   useEffect(() => {
     const storedKey = localStorage.getItem('openai_api_key');
@@ -149,11 +143,17 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         }
 
         const persona = personasById[personaName];
-        const vehicle = vehicleData[selectedVehicle as keyof typeof vehicleData];
+        const vehicle = vehiclesById[selectedVehicle];
         
         if (!persona || !vehicle) {
           throw new Error(`Invalid persona ${personaName} or vehicle ${selectedVehicle}`);
         }
+
+        // Transform vehicle to match LLM client expectations
+        const vehicleForAnalysis = {
+          brand: vehicle.manufacturer || vehicle.name,
+          name: vehicle.name
+        };
 
         setAnalysisStatus(`Starting analysis for ${personaName}...`);
 
@@ -196,7 +196,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
             const response = await llmClient.rankOptions(
               maxDiffSets[i],
               persona,
-              vehicle,
+              vehicleForAnalysis,
               featureDescMap
             );
             

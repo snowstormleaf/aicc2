@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { Menu, Settings, Users } from "lucide-react";
+import { Menu, Settings, Users, Car } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfigPage } from "./ConfigPage";
 import { PersonaLibrary } from "./PersonaLibrary";
+import { VehicleLibrary } from "@/components/vehicles/VehicleLibrary";
 
 export const BurgerMenu = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -36,6 +37,10 @@ export const BurgerMenu = () => {
                 <Users className="h-4 w-4" />
                 Personas
               </TabsTrigger>
+              <TabsTrigger value="vehicles" className="gap-2">
+                <Car className="h-4 w-4" />
+                Vehicles
+              </TabsTrigger>
             </TabsList>
 
             <TabsContent value="config" className="mt-4">
@@ -44,6 +49,10 @@ export const BurgerMenu = () => {
 
             <TabsContent value="personas" className="mt-4">
               <PersonaLibrary />
+            </TabsContent>
+
+            <TabsContent value="vehicles" className="mt-4">
+              <VehicleLibrary />
             </TabsContent>
           </Tabs>
         </div>
