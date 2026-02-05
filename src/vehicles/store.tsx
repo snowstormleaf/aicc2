@@ -8,12 +8,13 @@ import { useVehiclesStore } from "@/application/vehicles/store";
  * Loads vehicles from DB on mount.
  */
 export function VehiclesProvider({ children }: { children: React.ReactNode }) {
-  const store = useVehiclesStore();
+  // Select only the stable loadVehicles action to avoid re-running on state updates
+  const loadVehicles = useVehiclesStore((s) => s.loadVehicles);
 
   // Load vehicles from DB on mount
   React.useEffect(() => {
-    store.loadVehicles();
-  }, [store]);
+    loadVehicles();
+  }, [loadVehicles]);
 
   return <>{children}</>;
 }

@@ -51,17 +51,18 @@ function buildSeedPersonas(): Record<string, CustomerPersona> {
  */
 export function PersonasProvider({ children }: { children: React.ReactNode }) {
   const seedPersonas = React.useMemo(() => buildSeedPersonas(), []);
-  const store = usePersonasStore();
+  const initializePersonas = usePersonasStore((s) => s.initializePersonas);
+  const loadPersonas = usePersonasStore((s) => s.loadPersonas);
 
   // Initialize with seed personas on first mount
   React.useEffect(() => {
-    store.initializePersonas(seedPersonas);
-  }, [seedPersonas, store]);
+    initializePersonas(seedPersonas);
+  }, [seedPersonas, initializePersonas]);
 
   // Load personas from DB on mount
   React.useEffect(() => {
-    store.loadPersonas();
-  }, [store]);
+    loadPersonas();
+  }, [loadPersonas]);
 
   return <>{children}</>;
 }

@@ -39,44 +39,66 @@ export const FeatureUpload = ({ features, onFeaturesUploaded }: FeatureUploadPro
   };
 
   const parseCSV = (text: string): Feature[] => {
-    const lines = text.split('\n').filter(line => line.trim());
-    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-    
+    // Normalize line endings and split into non-empty lines
+    const lines = text.replace(/\r\n/g, '\n').split('\n').filter(line => line.trim());
+
+    // Robust CSV line splitter that handles quoted fields
+    const splitLine = (line: string) => {
+      const cols: string[] = [];
+      let cur = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+          if (inQuotes && line[i + 1] === '"') {
+            cur += '"';
+            i++; // skip escaped quote
+          } else {
+            inQuotes = !inQuotes;
+          }
+        } else if (ch === ',' && !inQuotes) {
+          cols.push(cur);
+          cur = '';
+        } else {
+          cur += ch;
+        }
+      }
+      cols.push(cur);
+      return cols.map(c => c.trim());
+    };
+
+    const headers = splitLine(lines[0]).map(h => h.trim().toLowerCase());
+
     // Validate headers
-    const requiredHeaders = ['feature name', 'description', 'material cost'];
-    const hasRequiredHeaders = requiredHeaders.every(header => 
-      headers.some(h => h.includes(header.split(' ')[0]))
-    );
-    
-    if (!hasRequiredHeaders) {
-      throw new Error('CSV must contain columns: Feature Name, Description, Material Cost (USD)');
-    }
-    
     const nameIndex = headers.findIndex(h => h.includes('feature') || h.includes('name'));
     const descIndex = headers.findIndex(h => h.includes('description'));
     const costIndex = headers.findIndex(h => h.includes('cost') || h.includes('price'));
-    
+
+    if (nameIndex === -1 || descIndex === -1 || costIndex === -1) {
+      throw new Error('CSV must contain columns: Feature Name, Description, Material Cost (USD)');
+    }
+
     return lines.slice(1).map((line, index) => {
-      const cols = line.split(',').map(col => col.trim().replace(/"/g, ''));
-      
+      const cols = splitLine(line);
+
       const name = cols[nameIndex]?.trim();
       const description = cols[descIndex]?.trim();
       const costStr = cols[costIndex]?.trim();
-      
+
       if (!name || !description || !costStr) {
         throw new Error(`Row ${index + 2}: Missing required data`);
       }
-      
+
       const materialCost = parseFloat(costStr.replace(/[^0-9.-]/g, ''));
       if (isNaN(materialCost)) {
         throw new Error(`Row ${index + 2}: Invalid cost value "${costStr}"`);
       }
-      
-      return { 
+
+      return {
         id: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-        name, 
-        description, 
-        materialCost 
+        name,
+        description,
+        materialCost,
       };
     });
   };

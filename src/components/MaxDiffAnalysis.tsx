@@ -39,6 +39,17 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
   const { personasById, getPersonaName } = usePersonas();
   const { vehiclesById } = useVehicles();
 
+  // Defensive guards: ensure prerequisites are present to avoid runtime crashes
+  if (!selectedVehicle || selectedPersonas.length === 0 || features.length === 0) {
+    return (
+      <Card className="p-6">
+        <p className="text-center text-muted-foreground">
+          Please select at least one persona, a vehicle, and upload features before running analysis.
+        </p>
+      </Card>
+    );
+  }
+
   useEffect(() => {
     const storedKey = localStorage.getItem('openai_api_key');
     if (storedKey) {
@@ -157,13 +168,24 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
 
         setAnalysisStatus(`Starting analysis for ${personaName}...`);
 
-        // Convert features to proper format with IDs
-        const engineFeatures = features.map(f => ({
-          id: f.id || f.name.toLowerCase().replace(/\s+/g, '-'),
-          name: f.name,
-          description: f.description,
-          materialCost: f.materialCost
-        }));
+        // Convert features to proper format with unique IDs
+        const seenIds = new Set<string>();
+        const engineFeatures = features.map((f, idx) => {
+          let baseId = (f.id || f.name.toLowerCase().replace(/\s+/g, '-'));
+          baseId = baseId.replace(/[^a-z0-9\-]/g, '').toLowerCase() || `feature-${idx}`;
+          let id = baseId;
+          let i = 1;
+          while (seenIds.has(id)) {
+            id = `${baseId}-${i++}`;
+          }
+          seenIds.add(id);
+          return {
+            id,
+            name: f.name,
+            description: f.description,
+            materialCost: f.materialCost
+          };
+        });
 
         // Generate vouchers with AI bounds
         const featureCosts = engineFeatures.map(f => f.materialCost);
@@ -297,7 +319,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
             <div>
               <span className="text-sm font-medium">Vehicle:</span>
               <Badge variant="outline" className="ml-2">
-                {vehicleNames[selectedVehicle as keyof typeof vehicleNames]}
+                {vehiclesById[selectedVehicle]?.name ?? selectedVehicle}
               </Badge>
             </div>
             <div>

@@ -34,7 +34,12 @@ export class HttpClient {
 
       const contentType = response.headers.get('content-type');
       if (contentType?.includes('application/json')) {
-        return (await response.json()) as T;
+        const json = await response.json();
+        // Unwrap API envelope { success: boolean, data: T } if present
+        if (json && typeof json === 'object' && 'success' in json && 'data' in json) {
+          return json.data as T;
+        }
+        return json as T;
       }
 
       return undefined as T;

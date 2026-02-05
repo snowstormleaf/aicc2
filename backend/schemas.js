@@ -53,9 +53,6 @@ export const PersonaBatchSchema = z.object({
   personas: z.array(PersonaSchema),
 });
 
-export type Persona = z.infer<typeof PersonaSchema>;
-export type PersonaBatch = z.infer<typeof PersonaBatchSchema>;
-
 // ===== VEHICLE SCHEMAS =====
 
 export const VehicleSchema = z.object({
@@ -73,9 +70,6 @@ export const VehicleSchema = z.object({
 export const VehicleBatchSchema = z.object({
   vehicles: z.array(VehicleSchema),
 });
-
-export type Vehicle = z.infer<typeof VehicleSchema>;
-export type VehicleBatch = z.infer<typeof VehicleBatchSchema>;
 
 // ===== VALIDATION UTILITIES =====
 

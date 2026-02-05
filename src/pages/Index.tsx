@@ -106,6 +106,20 @@ const Index = () => {
             features={features}
             onFeaturesUploaded={(newFeatures) => {
               setFeatures(newFeatures);
+
+              // Ensure prerequisites exist before proceeding to analysis
+              if (!selectedVehicle) {
+                // No vehicle selected - navigate back to vehicle step
+                setTimeout(() => setCurrentStep('vehicle'), 200);
+                return;
+              }
+
+              if (selectedPersonas.length === 0) {
+                // No persona selected - navigate to persona step
+                setTimeout(() => setCurrentStep('persona'), 200);
+                return;
+              }
+
               setTimeout(() => setCurrentStep('analysis'), 500);
             }}
           />
