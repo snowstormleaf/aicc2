@@ -1,14 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Brain, TrendingUp, DollarSign, CheckCircle, AlertCircle } from "lucide-react";
 import { MaxDiffEngine, PerceivedValue } from "@/lib/maxdiff-engine";
-import { LLMClient } from "@/lib/llm-client";
+import { buildSystemPrompt, buildUserPrompt, buildVoucherPrompt, LLMClient } from "@/lib/llm-client";
 import { usePersonas } from "@/personas/store";
 import { useVehicles } from "@/vehicles/store";
 import { ApiKeyInput } from "./ApiKeyInput";
+import { DEFAULT_MODEL, DEFAULT_SERVICE_TIER, formatPrice, getStoredModelConfig, MODEL_PRICING } from "@/lib/model-pricing";
 
 interface Feature {
   id: string;
@@ -35,6 +36,8 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
   const [elapsedTime, setElapsedTime] = useState(0);
   const [eta, setEta] = useState(0);
   const [useCache, setUseCache] = useState(false);
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
+  const [serviceTier, setServiceTier] = useState(DEFAULT_SERVICE_TIER);
 
   const { personasById, getPersonaName } = usePersonas();
   const { vehiclesById } = useVehicles();
@@ -56,6 +59,22 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
       setApiKey(storedKey);
       setHasApiKey(true);
     }
+  }, []);
+
+  useEffect(() => {
+    const updateModelConfig = () => {
+      const stored = getStoredModelConfig();
+      setSelectedModel(stored.model);
+      setServiceTier(stored.serviceTier);
+    };
+
+    updateModelConfig();
+    window.addEventListener('model-config-updated', updateModelConfig);
+    window.addEventListener('storage', updateModelConfig);
+    return () => {
+      window.removeEventListener('model-config-updated', updateModelConfig);
+      window.removeEventListener('storage', updateModelConfig);
+    };
   }, []);
 
   const handleApiKeySet = (key: string) => {
@@ -99,6 +118,110 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
   const designParams = calculateOptimalSets(features.length);
   const totalSets = designParams.sets;
 
+  const estimateTokens = (text: string) => Math.ceil(text.length / 4);
+
+  const buildEngineFeatures = (items: Feature[]) => {
+    const seenIds = new Set<string>();
+    return items.map((f, idx) => {
+      let baseId = (f.id || f.name.toLowerCase().replace(/\s+/g, '-'));
+      baseId = baseId.replace(/[^a-z0-9\-]/g, '').toLowerCase() || `feature-${idx}`;
+      let id = baseId;
+      let i = 1;
+      while (seenIds.has(id)) {
+        id = `${baseId}-${i++}`;
+      }
+      seenIds.add(id);
+      return {
+        id,
+        name: f.name,
+        description: f.description,
+        materialCost: f.materialCost
+      };
+    });
+  };
+
+  const costEstimate = useMemo(() => {
+    if (useCache) {
+      return {
+        totalCost: 0,
+        inputCost: 0,
+        outputCost: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        totalCalls: 0
+      };
+    }
+
+    const vehicle = vehiclesById[selectedVehicle];
+    if (!vehicle) return null;
+
+    const { sets: numSets } = calculateOptimalSets(features.length);
+    const totalCalls = selectedPersonas.length * numSets;
+    if (totalCalls === 0) return null;
+
+    const engineFeatures = buildEngineFeatures(features);
+    const featureCosts = engineFeatures.map(f => f.materialCost);
+    const vouchers = MaxDiffEngine.generateVouchers(featureCosts, {
+      min_discount: 10,
+      max_discount: 200,
+      levels: 6
+    });
+    const maxDiffSets = MaxDiffEngine.generateMaxDiffSets(
+      engineFeatures,
+      vouchers,
+      Math.max(3, Math.min(5, Math.ceil(engineFeatures.length / 5)))
+    );
+    const sampleSet = maxDiffSets[0];
+    if (!sampleSet) return null;
+
+    const featureDescMap = new Map<string, string>();
+    engineFeatures.forEach(f => {
+      featureDescMap.set(f.id, f.description);
+    });
+    vouchers.forEach(v => {
+      featureDescMap.set(v.id, v.description);
+    });
+
+    const vehicleForAnalysis = {
+      brand: vehicle.manufacturer || vehicle.name,
+      name: vehicle.name
+    };
+
+    const personaTokenCounts = selectedPersonas.map((personaId) => {
+      const persona = personasById[personaId];
+      return persona ? estimateTokens(buildSystemPrompt(persona)) : 0;
+    });
+    const avgSystemTokens = personaTokenCounts.length
+      ? personaTokenCounts.reduce((sum, value) => sum + value, 0) / personaTokenCounts.length
+      : 0;
+    const userTokens = estimateTokens(buildUserPrompt(sampleSet, vehicleForAnalysis, featureDescMap));
+
+    const perCallInputTokens = avgSystemTokens + userTokens;
+    const perCallOutputTokens = 200;
+
+    let inputTokens = Math.round(perCallInputTokens * totalCalls);
+    let outputTokens = Math.round(perCallOutputTokens * totalCalls);
+
+    const voucherPrompt = buildVoucherPrompt(new Map(engineFeatures.map((f) => [f.name, f.description])));
+    const voucherInputTokens = estimateTokens('You are an automotive pricing expert.') + estimateTokens(voucherPrompt);
+    inputTokens += voucherInputTokens;
+    outputTokens += 80;
+
+    const pricing = MODEL_PRICING[serviceTier][selectedModel];
+    const inputCost = (inputTokens / 1_000_000) * pricing.input;
+    const outputCost = (outputTokens / 1_000_000) * pricing.output;
+    const totalCost = inputCost + outputCost;
+
+    return {
+      totalCost,
+      inputCost,
+      outputCost,
+      inputTokens,
+      outputTokens,
+      totalCalls
+    };
+  }, [features, personasById, selectedModel, selectedPersonas, selectedVehicle, serviceTier, useCache, vehiclesById]);
+
   const runAnalysis = async () => {
     if (!hasApiKey) {
       setAnalysisStatus('API key required');
@@ -120,9 +243,14 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
       const results = new Map<string, PerceivedValue[]>();
 
       // Initialize LLM client
+      const storedModelConfig = getStoredModelConfig();
+      setSelectedModel(storedModelConfig.model);
+      setServiceTier(storedModelConfig.serviceTier);
       const llmClient = new LLMClient({
         apiKey,
-        model: 'gpt-4.1-mini-2025-04-14',
+        model: storedModelConfig.model,
+        reasoningModel: storedModelConfig.model,
+        serviceTier: storedModelConfig.serviceTier,
         useGPT: true,
         temperature: 0.2,
       });
@@ -169,23 +297,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         setAnalysisStatus(`Starting analysis for ${personaName}...`);
 
         // Convert features to proper format with unique IDs
-        const seenIds = new Set<string>();
-        const engineFeatures = features.map((f, idx) => {
-          let baseId = (f.id || f.name.toLowerCase().replace(/\s+/g, '-'));
-          baseId = baseId.replace(/[^a-z0-9\-]/g, '').toLowerCase() || `feature-${idx}`;
-          let id = baseId;
-          let i = 1;
-          while (seenIds.has(id)) {
-            id = `${baseId}-${i++}`;
-          }
-          seenIds.add(id);
-          return {
-            id,
-            name: f.name,
-            description: f.description,
-            materialCost: f.materialCost
-          };
-        });
+        const engineFeatures = buildEngineFeatures(features);
 
         // Generate vouchers with AI bounds
         const featureCosts = engineFeatures.map(f => f.materialCost);
@@ -328,6 +440,33 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                 {features.length} loaded
               </Badge>
             </div>
+            <div>
+              <span className="text-sm font-medium">Model:</span>
+              <Badge variant="outline" className="ml-2">
+                {selectedModel}
+              </Badge>
+              <Badge variant="outline" className="ml-2">
+                {serviceTier === 'flex' ? 'Flex' : 'Standard'}
+              </Badge>
+            </div>
+            {costEstimate && (
+              <div className="text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">Estimated cost:</span>
+                  <span className="font-semibold">
+                    {useCache ? '$0.00' : formatPrice(costEstimate.totalCost)}
+                  </span>
+                </div>
+                {!useCache && (
+                  <p className="text-xs text-muted-foreground">
+                    ~{costEstimate.totalCalls} calls · {Math.round(costEstimate.inputTokens)} input tokens · {Math.round(costEstimate.outputTokens)} output tokens
+                  </p>
+                )}
+                {useCache && (
+                  <p className="text-xs text-muted-foreground">Cache enabled: no new API calls expected.</p>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
 
