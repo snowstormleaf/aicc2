@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import type { CustomerPersona } from "@/personas/types";
+import { buildPersonaFormDefaults } from "@/lib/form-defaults";
 
 function splitLines(v: string) {
   return v
@@ -46,6 +47,7 @@ Return ONLY a single JSON object (no markdown) with this shape:
 
 {
   "name": "string",
+  "brand": "string",
   "summary": "string",
   "traits": ["string", ...],
   "tags": ["string", ...],
@@ -103,32 +105,35 @@ export function PersonaUpsertDialog(props: {
 
   const [tab, setTab] = React.useState<"manual" | "ai">("manual");
 
-  const [name, setName] = React.useState(initial?.name ?? "");
-  const [summary, setSummary] = React.useState(initial?.summary ?? "");
+  const initialDefaults = React.useMemo(() => buildPersonaFormDefaults(initial), [initial]);
 
-  const [role, setRole] = React.useState(initial?.attributes?.role ?? "");
-  const [companySize, setCompanySize] = React.useState(initial?.attributes?.company_size ?? "");
-  const [responsibility, setResponsibility] = React.useState(initial?.attributes?.responsibility ?? "");
-  const [decisionAuthority, setDecisionAuthority] = React.useState(initial?.attributes?.decision_authority ?? "");
+  const [name, setName] = React.useState(initialDefaults.name);
+  const [summary, setSummary] = React.useState(initialDefaults.summary);
+  const [brand, setBrand] = React.useState(initialDefaults.brand);
 
-  const [age, setAge] = React.useState(initial?.demographics?.age ?? "");
-  const [income, setIncome] = React.useState(initial?.demographics?.income ?? "");
-  const [family, setFamily] = React.useState(initial?.demographics?.family ?? "");
-  const [location, setLocation] = React.useState(initial?.demographics?.location ?? "");
+  const [role, setRole] = React.useState(initialDefaults.role);
+  const [companySize, setCompanySize] = React.useState(initialDefaults.companySize);
+  const [responsibility, setResponsibility] = React.useState(initialDefaults.responsibility);
+  const [decisionAuthority, setDecisionAuthority] = React.useState(initialDefaults.decisionAuthority);
 
-  const [traits, setTraits] = React.useState((initial?.traits ?? []).join("\n"));
-  const [tags, setTags] = React.useState((initial?.tags ?? []).join("\n"));
+  const [age, setAge] = React.useState(initialDefaults.age);
+  const [income, setIncome] = React.useState(initialDefaults.income);
+  const [family, setFamily] = React.useState(initialDefaults.family);
+  const [location, setLocation] = React.useState(initialDefaults.location);
 
-  const [motivations, setMotivations] = React.useState((initial?.motivations ?? []).join("\n"));
-  const [painPoints, setPainPoints] = React.useState((initial?.painPoints ?? []).join("\n"));
-  const [buyingBehavior, setBuyingBehavior] = React.useState((initial?.buyingBehavior ?? []).join("\n"));
+  const [traits, setTraits] = React.useState(initialDefaults.traits);
+  const [tags, setTags] = React.useState(initialDefaults.tags);
 
-  const [goals, setGoals] = React.useState((initial?.goals ?? []).join("\n"));
-  const [jobsToBeDone, setJobsToBeDone] = React.useState((initial?.jobsToBeDone ?? []).join("\n"));
-  const [decisionCriteria, setDecisionCriteria] = React.useState((initial?.decisionCriteria ?? []).join("\n"));
-  const [objections, setObjections] = React.useState((initial?.objections ?? []).join("\n"));
-  const [channels, setChannels] = React.useState((initial?.channels ?? []).join("\n"));
-  const [preferredContent, setPreferredContent] = React.useState((initial?.preferredContent ?? []).join("\n"));
+  const [motivations, setMotivations] = React.useState(initialDefaults.motivations);
+  const [painPoints, setPainPoints] = React.useState(initialDefaults.painPoints);
+  const [buyingBehavior, setBuyingBehavior] = React.useState(initialDefaults.buyingBehavior);
+
+  const [goals, setGoals] = React.useState(initialDefaults.goals);
+  const [jobsToBeDone, setJobsToBeDone] = React.useState(initialDefaults.jobsToBeDone);
+  const [decisionCriteria, setDecisionCriteria] = React.useState(initialDefaults.decisionCriteria);
+  const [objections, setObjections] = React.useState(initialDefaults.objections);
+  const [channels, setChannels] = React.useState(initialDefaults.channels);
+  const [preferredContent, setPreferredContent] = React.useState(initialDefaults.preferredContent);
 
   const [brief, setBrief] = React.useState("");
   const [aiBusy, setAiBusy] = React.useState(false);
@@ -138,7 +143,30 @@ export function PersonaUpsertDialog(props: {
     if (!open) return;
     setError(null);
     setTab("manual");
-  }, [open]);
+    const defaults = buildPersonaFormDefaults(initial);
+    setName(defaults.name);
+    setSummary(defaults.summary);
+    setBrand(defaults.brand);
+    setRole(defaults.role);
+    setCompanySize(defaults.companySize);
+    setResponsibility(defaults.responsibility);
+    setDecisionAuthority(defaults.decisionAuthority);
+    setAge(defaults.age);
+    setIncome(defaults.income);
+    setFamily(defaults.family);
+    setLocation(defaults.location);
+    setTraits(defaults.traits);
+    setTags(defaults.tags);
+    setMotivations(defaults.motivations);
+    setPainPoints(defaults.painPoints);
+    setBuyingBehavior(defaults.buyingBehavior);
+    setGoals(defaults.goals);
+    setJobsToBeDone(defaults.jobsToBeDone);
+    setDecisionCriteria(defaults.decisionCriteria);
+    setObjections(defaults.objections);
+    setChannels(defaults.channels);
+    setPreferredContent(defaults.preferredContent);
+  }, [open, initial]);
 
   const handleSaveManual = () => {
     setError(null);
@@ -164,6 +192,7 @@ export function PersonaUpsertDialog(props: {
         responsibility: responsibility.trim(),
         decision_authority: decisionAuthority.trim(),
       },
+      brand: brand.trim() || undefined,
       demographics: {
         age: age.trim() || "Unknown",
         income: income.trim() || "Unknown",
@@ -210,6 +239,7 @@ export function PersonaUpsertDialog(props: {
       // Hydrate fields into the manual form (so user can edit before saving)
       setName(String(partial.name ?? "").trim());
       setSummary(String(partial.summary ?? "").trim());
+      setBrand(String(partial.brand ?? "").trim());
 
       setRole(String(partial.attributes?.role ?? "").trim());
       setCompanySize(String(partial.attributes?.company_size ?? "").trim());
@@ -295,6 +325,10 @@ export function PersonaUpsertDialog(props: {
               <div className="space-y-2">
                 <Label>Name *</Label>
                 <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Fleet Manager" />
+              </div>
+              <div className="space-y-2">
+                <Label>Brand</Label>
+                <Input value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="McLaren" />
               </div>
               <div className="space-y-2">
                 <Label>Summary</Label>

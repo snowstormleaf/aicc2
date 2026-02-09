@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import type { Vehicle } from "@/types/vehicle";
+import { buildVehicleFormDefaults } from "@/lib/form-defaults";
 
 function splitLines(v: string) {
   return v
@@ -94,12 +95,14 @@ export function VehicleUpsertDialog(props: {
 
   const [tab, setTab] = React.useState<"manual" | "ai">("manual");
 
-  const [name, setName] = React.useState(initial?.name ?? "");
-  const [manufacturer, setManufacturer] = React.useState(initial?.manufacturer ?? "");
-  const [model, setModel] = React.useState(initial?.model ?? "");
-  const [year, setYear] = React.useState(initial?.year ? String(initial.year) : "");
-  const [description, setDescription] = React.useState(initial?.description ?? "");
-  const [tags, setTags] = React.useState((initial?.tags ?? []).join("\n"));
+  const initialDefaults = React.useMemo(() => buildVehicleFormDefaults(initial), [initial]);
+
+  const [name, setName] = React.useState(initialDefaults.name);
+  const [manufacturer, setManufacturer] = React.useState(initialDefaults.manufacturer);
+  const [model, setModel] = React.useState(initialDefaults.model);
+  const [year, setYear] = React.useState(initialDefaults.year);
+  const [description, setDescription] = React.useState(initialDefaults.description);
+  const [tags, setTags] = React.useState(initialDefaults.tags);
 
   const [brief, setBrief] = React.useState("");
   const [aiBusy, setAiBusy] = React.useState(false);
@@ -109,7 +112,14 @@ export function VehicleUpsertDialog(props: {
     if (!open) return;
     setError(null);
     setTab("manual");
-  }, [open]);
+    const defaults = buildVehicleFormDefaults(initial);
+    setName(defaults.name);
+    setManufacturer(defaults.manufacturer);
+    setModel(defaults.model);
+    setYear(defaults.year);
+    setDescription(defaults.description);
+    setTags(defaults.tags);
+  }, [open, initial]);
 
   const handleSaveManual = () => {
     setError(null);

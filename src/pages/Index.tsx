@@ -11,6 +11,7 @@ import { ResultsVisualization } from "@/components/ResultsVisualization";
 import { PerceivedValue } from "@/lib/maxdiff-engine";
 import { BurgerMenu } from "@/components/BurgerMenu";
 import { Car, Users, Upload, BarChart3, CheckCircle, ArrowRight } from "lucide-react";
+import type { MaxDiffCallLog } from "@/types/analysis";
 
 interface Feature {
   id: string;
@@ -27,6 +28,9 @@ const Index = () => {
   const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
   const [features, setFeatures] = useState<Feature[]>([]);
   const [analysisResults, setAnalysisResults] = useState<Map<string, PerceivedValue[]> | null>(null);
+  const [callLogs, setCallLogs] = useState<MaxDiffCallLog[]>([]);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [workspaceTab, setWorkspaceTab] = useState("config");
 
   const steps = [
     { id: 'persona', label: 'Select Persona', icon: Users, description: 'Choose target buyer persona' },
@@ -106,21 +110,8 @@ const Index = () => {
             features={features}
             onFeaturesUploaded={(newFeatures) => {
               setFeatures(newFeatures);
-
-              // Ensure prerequisites exist before proceeding to analysis
-              if (!selectedVehicle) {
-                // No vehicle selected - navigate back to vehicle step
-                setTimeout(() => setCurrentStep('vehicle'), 200);
-                return;
-              }
-
-              if (selectedPersonas.length === 0) {
-                // No persona selected - navigate to persona step
-                setTimeout(() => setCurrentStep('persona'), 200);
-                return;
-              }
-
-              setTimeout(() => setCurrentStep('analysis'), 500);
+              setAnalysisResults(null);
+              setCallLogs([]);
             }}
           />
         );
@@ -130,9 +121,14 @@ const Index = () => {
             features={features}
             selectedPersonas={selectedPersonas}
             selectedVehicle={selectedVehicle!}
-            onAnalysisComplete={(results) => {
+            onAnalysisComplete={(results, logs) => {
               setAnalysisResults(results);
+              setCallLogs(logs);
               setTimeout(() => setCurrentStep('results'), 1000);
+            }}
+            onEditAnalysisParameters={() => {
+              setWorkspaceTab('design');
+              setWorkspaceOpen(true);
             }}
           />
         );
@@ -140,6 +136,7 @@ const Index = () => {
         return analysisResults ? (
           <ResultsVisualization
             results={analysisResults}
+            callLogs={callLogs}
           />
         ) : null;
       default:
@@ -161,7 +158,13 @@ const Index = () => {
               <Badge variant="outline" className="text-xs">
                 Powered by AI Personas
               </Badge>
-              <BurgerMenu />
+              <BurgerMenu
+                open={workspaceOpen}
+                onOpenChange={setWorkspaceOpen}
+                activeTab={workspaceTab}
+                onTabChange={setWorkspaceTab}
+                featureCount={features.length}
+              />
             </div>
           </div>
         </div>

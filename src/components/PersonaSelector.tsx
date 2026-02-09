@@ -2,10 +2,12 @@ import * as React from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Users, Briefcase, ShoppingCart, Eye } from "lucide-react";
+import { Users, Briefcase, ShoppingCart, Eye, Edit2 } from "lucide-react";
 import { usePersonas } from "@/personas/store";
 import { PersonaDetailsDialog } from "@/components/PersonaDetailsDialog";
+import { PersonaUpsertDialog } from "@/components/PersonaUpsertDialog";
 import type { CustomerPersona } from "@/personas/types";
+import { useWorkspaceStore } from "@/store/workspaceStore";
 
 function personaIcon(id: string) {
   if (id === "fleet-manager") return Briefcase;
@@ -20,14 +22,22 @@ interface PersonaSelectorProps {
 }
 
 export const PersonaSelector = ({ selectedPersonas, onPersonaSelect }: PersonaSelectorProps) => {
-  const { personas, personasById, getPersonaName } = usePersonas();
+  const { personas, personasById, getPersonaName, upsertPersona } = usePersonas();
+  const selectedBrand = useWorkspaceStore((state) => state.selectedBrand);
 
   const [detailsOpen, setDetailsOpen] = React.useState(false);
   const [detailsId, setDetailsId] = React.useState<string | null>(null);
+  const [editOpen, setEditOpen] = React.useState(false);
+  const [editPersona, setEditPersona] = React.useState<CustomerPersona | null>(null);
 
   const openDetails = (id: string) => {
     setDetailsId(id);
     setDetailsOpen(true);
+  };
+
+  const openEdit = (persona: CustomerPersona) => {
+    setEditPersona(persona);
+    setEditOpen(true);
   };
 
   const handlePersonaToggle = (personaId: string) => {
@@ -40,6 +50,10 @@ export const PersonaSelector = ({ selectedPersonas, onPersonaSelect }: PersonaSe
 
   const detailsPersona: CustomerPersona | null =
     detailsId ? personasById[detailsId] ?? null : null;
+  const normalizedBrand = selectedBrand.trim().toLowerCase();
+  const filteredPersonas = normalizedBrand
+    ? personas.filter((persona) => (persona.brand ?? "").toLowerCase() === normalizedBrand)
+    : personas;
 
   return (
     <div className="space-y-6">
@@ -51,7 +65,7 @@ export const PersonaSelector = ({ selectedPersonas, onPersonaSelect }: PersonaSe
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {personas.map((persona) => {
+        {filteredPersonas.map((persona) => {
           const Icon = personaIcon(persona.id);
           const isSelected = selectedPersonas.includes(persona.id);
 
@@ -122,12 +136,33 @@ export const PersonaSelector = ({ selectedPersonas, onPersonaSelect }: PersonaSe
                   >
                     <Eye className="h-4 w-4" />
                   </Button>
+
+                  {isSelected && (
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openEdit(persona);
+                      }}
+                      aria-label="Edit persona"
+                      title="Edit persona"
+                    >
+                      <Edit2 className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>
           );
         })}
       </div>
+
+      {filteredPersonas.length === 0 && normalizedBrand && (
+        <div className="text-center p-6 border rounded-lg text-sm text-muted-foreground">
+          No personas found for brand "{selectedBrand}". Update the brand filter in Workspace.
+        </div>
+      )}
 
       {selectedPersonas.length > 0 && (
         <div className="mt-6 p-4 bg-muted rounded-lg">
@@ -147,6 +182,17 @@ export const PersonaSelector = ({ selectedPersonas, onPersonaSelect }: PersonaSe
             ? () => handlePersonaToggle(detailsPersona.id)
             : undefined
         }
+      />
+
+      <PersonaUpsertDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        mode="edit"
+        initial={editPersona}
+        onSave={(persona) => {
+          upsertPersona(persona);
+          setEditOpen(false);
+        }}
       />
     </div>
   );

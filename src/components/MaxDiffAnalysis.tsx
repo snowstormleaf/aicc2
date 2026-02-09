@@ -3,13 +3,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { Brain, TrendingUp, DollarSign, CheckCircle, AlertCircle } from "lucide-react";
+import { Brain, DollarSign, CheckCircle, AlertCircle, SlidersHorizontal } from "lucide-react";
 import { MaxDiffEngine, PerceivedValue } from "@/lib/maxdiff-engine";
 import { buildSystemPrompt, buildUserPrompt, buildVoucherPrompt, LLMClient } from "@/lib/llm-client";
 import { usePersonas } from "@/personas/store";
 import { useVehicles } from "@/vehicles/store";
 import { ApiKeyInput } from "./ApiKeyInput";
 import { DEFAULT_MODEL, DEFAULT_SERVICE_TIER, formatPrice, getStoredModelConfig, MODEL_PRICING } from "@/lib/model-pricing";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useToast } from "@/hooks/use-toast";
+import { calculateOptimalSets } from "@/lib/design-parameters";
+import type { MaxDiffCallLog } from "@/types/analysis";
 
 interface Feature {
   id: string;
@@ -22,10 +26,11 @@ interface MaxDiffAnalysisProps {
   features: Feature[];
   selectedPersonas: string[];
   selectedVehicle: string;
-  onAnalysisComplete: (results: Map<string, PerceivedValue[]>) => void;
+  onAnalysisComplete: (results: Map<string, PerceivedValue[]>, callLogs: MaxDiffCallLog[]) => void;
+  onEditAnalysisParameters?: () => void;
 }
 
-export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, onAnalysisComplete }: MaxDiffAnalysisProps) => {
+export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, onAnalysisComplete, onEditAnalysisParameters }: MaxDiffAnalysisProps) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [currentSet, setCurrentSet] = useState(0);
@@ -38,6 +43,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
   const [useCache, setUseCache] = useState(false);
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
   const [serviceTier, setServiceTier] = useState(DEFAULT_SERVICE_TIER);
+  const { toast } = useToast();
 
   const { personasById, getPersonaName } = usePersonas();
   const { vehiclesById } = useVehicles();
@@ -69,39 +75,6 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
   const handleApiKeySet = (key: string) => {
     setApiKey(key);
     setHasApiKey(!!key);
-  };
-
-// MaxDiff BIBD (Balanced Incomplete Block Design) calculations
-  // t = number of treatments (features)
-  // k = items per set (typically 4)
-  // r = number of times each feature appears
-  // b = number of blocks (sets)
-  // λ = number of times each pair appears together
-  
-  const calculateOptimalSets = (numFeatures: number, itemsPerSet: number = 4) => {
-    // For optimal design: each feature should appear r times
-    // Recommended r = 3-5 for good statistical power
-    const optimalR = Math.max(3, Math.min(5, Math.ceil(numFeatures / 5)));
-    
-    // Number of sets (blocks) = (t * r) / k
-    const calculatedSets = Math.ceil((numFeatures * optimalR) / itemsPerSet);
-    
-    // For balanced design, λ (times each pair appears) = r * (k-1) / (t-1)
-    // This should be close to an integer for good balance
-    const lambda = (optimalR * (itemsPerSet - 1)) / (numFeatures - 1);
-    
-    // Practical constraints: minimum 8 sets, maximum 25 sets for feasibility
-    const minSets = Math.max(8, Math.ceil(numFeatures / 2));
-    const maxSets = Math.min(25, numFeatures * 2);
-    
-    const finalSets = Math.max(minSets, Math.min(maxSets, calculatedSets));
-    
-    return {
-      sets: finalSets,
-      r: optimalR,
-      lambda: lambda,
-      efficiency: lambda % 1 === 0 ? 1 : 1 - (lambda % 1) // Closer to integer λ = more efficient
-    };
   };
 
   const designParams = calculateOptimalSets(features.length);
@@ -225,6 +198,11 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
   const runAnalysis = async () => {
     if (!hasApiKey) {
       setAnalysisStatus('API key required');
+      toast({
+        title: "API key required",
+        description: "Add your OpenAI API key in Workspace → Configuration before running analysis.",
+        variant: "destructive",
+      });
       return;
     }
 
@@ -238,6 +216,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
     let callsDone = 0;
 
     try {
+      const callLogs: MaxDiffCallLog[] = [];
       const { sets: numSets } = calculateOptimalSets(features.length);
       const totalCalls = selectedPersonas.length * numSets;
       const results = new Map<string, PerceivedValue[]>();
@@ -327,6 +306,10 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
           setAnalysisStatus(`${personaName}: Analyzing set ${i + 1}/${maxDiffSets.length}`);
           
           try {
+            const timestamp = new Date().toISOString();
+            const displayedFeatures = maxDiffSets[i].options.map(option => option.name);
+            const optionNameById = new Map(maxDiffSets[i].options.map(option => [option.id, option.name]));
+
             const response = await llmClient.rankOptions(
               maxDiffSets[i],
               persona,
@@ -335,6 +318,12 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
             );
             
             responses.push(response);
+            callLogs.push({
+              timestamp,
+              displayedFeatures,
+              mostValued: optionNameById.get(response.mostValued) ?? response.mostValued,
+              leastValued: optionNameById.get(response.leastValued) ?? response.leastValued,
+            });
             callsDone++;
 
             // Update timing
@@ -359,6 +348,14 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
               mostValued,
               leastValued,
               ranking: []
+            });
+            const timestamp = new Date().toISOString();
+            const optionNameById = new Map(maxDiffSets[i].options.map(option => [option.id, option.name]));
+            callLogs.push({
+              timestamp,
+              displayedFeatures: maxDiffSets[i].options.map(option => option.name),
+              mostValued: optionNameById.get(mostValued) ?? mostValued,
+              leastValued: optionNameById.get(leastValued) ?? leastValued,
             });
             callsDone++;
             
@@ -387,7 +384,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         localStorage.setItem(cacheKey, JSON.stringify(perceivedValues));
       }
 
-      onAnalysisComplete(results);
+      onAnalysisComplete(results, callLogs);
       setAnalysisStatus('Analysis complete!');
 
     } catch (error) {
@@ -409,13 +406,36 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         <p className="text-muted-foreground">AI-powered persona simulation for feature valuation</p>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-3">
+      {!hasApiKey && (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>API key required</AlertTitle>
+          <AlertDescription>
+            Add your OpenAI API key in Workspace → Configuration to run MaxDiff analysis.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <div className="grid gap-6 md:grid-cols-2">
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Brain className="h-5 w-5 text-primary" />
-              Analysis Setup
-            </CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Brain className="h-5 w-5 text-primary" />
+                Analysis Setup
+              </CardTitle>
+              {onEditAnalysisParameters && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs"
+                  onClick={onEditAnalysisParameters}
+                >
+                  <SlidersHorizontal className="h-4 w-4 mr-1" />
+                  Edit analysis parameters
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent className="space-y-3">
             <div>
@@ -467,45 +487,6 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                 )}
               </div>
             )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <TrendingUp className="h-5 w-5 text-primary" />
-              BIBD Design Parameters
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="text-sm space-y-2">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Features (t):</span>
-                <span className="font-medium">{features.length}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Items per set (k):</span>
-                <span className="font-medium">4</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Sets required (b):</span>
-                <span className="font-medium">{totalSets}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Feature frequency (r):</span>
-                <span className="font-medium">{designParams.r}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Pair balance (λ):</span>
-                <span className="font-medium">{designParams.lambda.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Design efficiency:</span>
-                <Badge variant={designParams.efficiency > 0.8 ? "default" : "outline"} className="text-xs">
-                  {Math.round(designParams.efficiency * 100)}%
-                </Badge>
-              </div>
-            </div>
           </CardContent>
         </Card>
 

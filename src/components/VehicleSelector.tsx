@@ -14,7 +14,7 @@ interface VehicleSelectorProps {
 }
 
 export const VehicleSelector = ({ selectedVehicle, onSelectVehicle }: VehicleSelectorProps) => {
-  const { vehicles, getVehicleName } = useVehicles();
+  const { vehicles, getVehicleName, upsertVehicle } = useVehicles();
 
   const [detailsOpen, setDetailsOpen] = React.useState(false);
   const [detailsId, setDetailsId] = React.useState<string | null>(null);
@@ -173,7 +173,8 @@ export const VehicleSelector = ({ selectedVehicle, onSelectVehicle }: VehicleSel
         onOpenChange={setEditOpen}
         mode="edit"
         initial={editVehicle}
-        onSave={() => {
+        onSave={(vehicle) => {
+          upsertVehicle(vehicle);
           setEditOpen(false);
         }}
       />

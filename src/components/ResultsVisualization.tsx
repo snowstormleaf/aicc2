@@ -1,41 +1,102 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, BarChart, Bar, Cell } from 'recharts';
 import type { TooltipProps } from 'recharts';
-import { TrendingUp, Download, DollarSign, Target } from "lucide-react";
+import { TrendingUp, Download, FileSpreadsheet } from "lucide-react";
 
 import { PerceivedValue } from "@/lib/maxdiff-engine";
+import type { MaxDiffCallLog } from "@/types/analysis";
+import { createXlsxBlob } from "@/lib/xlsx-utils";
 
 interface ResultsVisualizationProps {
   results: Map<string, PerceivedValue[]>;
+  callLogs: MaxDiffCallLog[];
 }
 
-const personas = {
-  'fleet-manager': 'Fleet Manager',
-  'small-business-owner': 'Small Business Owner', 
-  'individual-buyer': 'Individual Buyer'
-};
+export const ResultsVisualization = ({ results, callLogs }: ResultsVisualizationProps) => {
+  const personas = Array.from(results.keys());
 
-const vehicles = {
-  'ford-transit-custom': 'Ford Transit Custom',
-  'ford-ranger': 'Ford Ranger',
-  'ford-kuga': 'Ford Kuga',
-  'ford-tourneo': 'Ford Tourneo'
-};
+  const downloadResults = () => {
+    let csvContent = "Persona,Feature Name,Description,Material Cost (USD),Perceived Value (USD),Value Ratio,Category\n";
+    
+    for (const [persona, perceivedValues] of results.entries()) {
+      csvContent += perceivedValues.map(r => {
+        const ratio = r.perceivedValue / r.materialCost;
+        const category = ratio > 1.2 ? 'High Value' : ratio < 0.8 ? 'Low Value' : 'Fair Value';
+        return `"${persona}","${r.featureName}","Feature ${r.featureId}",${r.materialCost},${r.perceivedValue.toFixed(2)},${ratio.toFixed(2)},${category}`;
+      }).join('\n') + '\n';
+    }
+    
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'maxdiff-analysis-results.csv';
+    a.click();
+    window.URL.revokeObjectURL(url);
+  };
 
-export const ResultsVisualization = ({ results }: ResultsVisualizationProps) => {
+  const downloadExcel = () => {
+    const resultsRows: (string | number)[][] = [
+      ["Feature", "Material cost", "Value"],
+    ];
+
+    personas.forEach((persona) => {
+      const personaResults = results.get(persona) ?? [];
+      const sortedResults = [...personaResults].sort((a, b) => b.perceivedValue - a.perceivedValue);
+      sortedResults.forEach((result) => {
+        resultsRows.push([result.featureName, result.materialCost, result.perceivedValue]);
+      });
+    });
+
+    const callsRows: (string | number)[][] = [
+      ["Timestamp (UTC)", "Displayed feature 1", "Displayed feature 2", "Displayed feature 3", "Displayed feature 4", "Most valued", "Least valued"],
+    ];
+
+    callLogs.forEach((log) => {
+      const displayed = [...log.displayedFeatures];
+      while (displayed.length < 4) {
+        displayed.push("");
+      }
+      callsRows.push([
+        log.timestamp,
+        displayed[0] ?? "",
+        displayed[1] ?? "",
+        displayed[2] ?? "",
+        displayed[3] ?? "",
+        log.mostValued,
+        log.leastValued,
+      ]);
+    });
+
+    const blob = createXlsxBlob([
+      { name: "Results", rows: resultsRows },
+      { name: "MaxDiff API Calls", rows: callsRows },
+    ]);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "maxdiff-analysis.xlsx";
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
   if (results.size === 0) {
     return (
       <Card className="p-6">
-        <p className="text-center text-muted-foreground">
-          No results to display. Please run the analysis first.
-        </p>
+        <div className="text-center space-y-3">
+          <p className="text-muted-foreground">
+            No results to display. Please run the analysis first.
+          </p>
+          <Button onClick={downloadExcel} variant="analytics" size="sm">
+            <FileSpreadsheet className="h-4 w-4 mr-2" />
+            Download Excel
+          </Button>
+        </div>
       </Card>
     );
   }
 
-  const personas = Array.from(results.keys());
   const allData = [];
   
   // Prepare data for scatter plot
@@ -75,32 +136,6 @@ export const ResultsVisualization = ({ results }: ResultsVisualizationProps) => 
       };
     }).sort((a, b) => Math.abs(b.difference) - Math.abs(a.difference));
   })() : [];
-
-  // Get first persona data for basic categorization
-  const firstPersonaResults = results.get(personas[0]) || [];
-  const winners = firstPersonaResults.filter(r => r.perceivedValue > r.materialCost * 1.2);
-  const losers = firstPersonaResults.filter(r => r.perceivedValue < r.materialCost * 0.8);
-  const neutral = firstPersonaResults.filter(r => r.perceivedValue >= r.materialCost * 0.8 && r.perceivedValue <= r.materialCost * 1.2);
-
-  const downloadResults = () => {
-    let csvContent = "Persona,Feature Name,Description,Material Cost (USD),Perceived Value (USD),Value Ratio,Category\n";
-    
-    for (const [persona, perceivedValues] of results.entries()) {
-      csvContent += perceivedValues.map(r => {
-        const ratio = r.perceivedValue / r.materialCost;
-        const category = ratio > 1.2 ? 'High Value' : ratio < 0.8 ? 'Low Value' : 'Fair Value';
-        return `"${persona}","${r.featureName}","Feature ${r.featureId}",${r.materialCost},${r.perceivedValue.toFixed(2)},${ratio.toFixed(2)},${category}`;
-      }).join('\n') + '\n';
-    }
-    
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'maxdiff-analysis-results.csv';
-    a.click();
-    window.URL.revokeObjectURL(url);
-  };
 
   type TooltipPayload = {
     featureName: string;
@@ -142,56 +177,6 @@ export const ResultsVisualization = ({ results }: ResultsVisualizationProps) => 
         </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2 text-data-positive">
-              <TrendingUp className="h-5 w-5" />
-              High Value Features
-            </CardTitle>
-            <CardDescription>Perceived value exceeds cost by 20%+</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-data-positive mb-1">{winners.length}</div>
-            <p className="text-sm text-muted-foreground">
-              {winners.length > 0 ? `Avg ratio: ${(winners.reduce((sum, w) => sum + w.perceivedValue / w.materialCost, 0) / winners.length).toFixed(1)}x` : 'No high-value features'}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Target className="h-5 w-5" />
-              Fair Value Features
-            </CardTitle>
-            <CardDescription>Perceived value matches cost ±20%</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold mb-1">{neutral.length}</div>
-            <p className="text-sm text-muted-foreground">
-              {neutral.length > 0 ? `Avg ratio: ${(neutral.reduce((sum, n) => sum + n.perceivedValue / n.materialCost, 0) / neutral.length).toFixed(1)}x` : 'No fair-value features'}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2 text-data-negative">
-              <DollarSign className="h-5 w-5" />
-              Low Value Features
-            </CardTitle>
-            <CardDescription>Perceived value below cost by 20%+</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-data-negative mb-1">{losers.length}</div>
-            <p className="text-sm text-muted-foreground">
-              {losers.length > 0 ? `Avg ratio: ${(losers.reduce((sum, l) => sum + l.perceivedValue / l.materialCost, 0) / losers.length).toFixed(1)}x` : 'No low-value features'}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
       <Card>
         <CardHeader>
           <div className="flex justify-between items-start">
@@ -204,10 +189,16 @@ export const ResultsVisualization = ({ results }: ResultsVisualizationProps) => 
                 Scatter plot showing perceived value (Y-axis) vs material cost (X-axis)
               </CardDescription>
             </div>
-            <Button onClick={downloadResults} variant="outline" size="sm">
-              <Download className="h-4 w-4 mr-2" />
-              Export Results
-            </Button>
+            <div className="flex gap-2">
+              <Button onClick={downloadResults} variant="outline" size="sm">
+                <Download className="h-4 w-4 mr-2" />
+                Export CSV
+              </Button>
+              <Button onClick={downloadExcel} variant="analytics" size="sm">
+                <FileSpreadsheet className="h-4 w-4 mr-2" />
+                Download Excel
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
