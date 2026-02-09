@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 interface FieldConfig {
   key: string;
   label: string;
-  render: (value: any) => React.ReactNode;
+  render: (value: unknown, entity: Record<string, unknown>) => React.ReactNode;
 }
 
 /**
@@ -30,10 +30,10 @@ interface SectionConfig {
 export interface EntityDetailsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  entity: any | null;
+  entity: Record<string, unknown> | null;
   entity_type: string; // e.g., "persona", "vehicle" for accessibility
   title?: string;
-  subtitle?: string;
+  subtitle?: React.ReactNode;
   sections: SectionConfig[];
   isSelected?: boolean;
   onToggleSelect?: () => void;
@@ -98,12 +98,19 @@ export function EntityDetailsDialog({
                 <AccordionTrigger>{section.title}</AccordionTrigger>
                 <AccordionContent>
                   {section.isList ? (
-                    <SectionList items={section.fields[0]?.render(entity) as string[]} />
+                    <SectionList
+                      items={(() => {
+                        const field = section.fields[0];
+                        const value = field ? entity?.[field.key] : undefined;
+                        const rendered = field?.render(value, entity);
+                        return Array.isArray(rendered) ? rendered : [];
+                      })()}
+                    />
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                       {section.fields.map((field) => {
                         const value = entity?.[field.key];
-                        const rendered = field.render(value);
+                        const rendered = field.render(value, entity);
 
                         return (
                           <div key={field.key}>

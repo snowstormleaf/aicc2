@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
  */
 export interface LibraryCallbacks<T> {
   onDetails: (id: string) => void;
-  onEdit: (entity: T) => void;
+  onEdit: (entity: T | null) => void;
   onDelete: (id: string) => void;
   onReset?: (id: string) => void;
 }
@@ -23,7 +23,7 @@ export interface EntityCardConfig {
   subtitleFields: (string | { field: string; prefix?: string; suffix?: string })[];
   searchFields: string[];
   tagsField?: string;
-  renderSubtitle?: (entity: any) => React.ReactNode;
+  renderSubtitle?: (entity: Record<string, unknown>) => React.ReactNode;
 }
 
 /**
@@ -37,6 +37,8 @@ export interface EntityLibraryProps<T> {
   renderEntityCard?: (entity: T, callbacks: LibraryCallbacks<T>, cardConfig: EntityCardConfig) => React.ReactNode;
 }
 
+const getString = (value: unknown) => (typeof value === "string" ? value : "");
+
 function defaultRenderEntityCard<T>(
   entity: T,
   callbacks: LibraryCallbacks<T>,
@@ -44,18 +46,18 @@ function defaultRenderEntityCard<T>(
   isSeed?: boolean,
   hasResetButton?: boolean,
 ) {
-  const any = entity as any;
-  const id = any.id || "";
-  const title = any[cardConfig.titleField] || "Untitled";
+  const record = entity as Record<string, unknown>;
+  const id = getString(record.id) || "";
+  const title = getString(record[cardConfig.titleField]) || "Untitled";
 
   // Build subtitle
   let subtitle = "";
   for (const field of cardConfig.subtitleFields) {
     if (typeof field === "string") {
-      const val = any[field];
+      const val = getString(record[field]);
       if (val) subtitle += (subtitle ? " · " : "") + val;
     } else {
-      const val = any[field.field];
+      const val = getString(record[field.field]);
       if (val) {
         const prefix = field.prefix ? `${field.prefix} ` : "";
         const suffix = field.suffix ? ` ${field.suffix}` : "";
@@ -64,7 +66,9 @@ function defaultRenderEntityCard<T>(
     }
   }
 
-  const tags = (cardConfig.tagsField && any[cardConfig.tagsField]) || [];
+  const tags = cardConfig.tagsField && Array.isArray(record[cardConfig.tagsField])
+    ? (record[cardConfig.tagsField] as string[])
+    : [];
 
   return (
     <Card key={id} className="hover:shadow-sm transition-shadow">
@@ -147,10 +151,12 @@ export function EntityLibrary<T extends { id: string }>({
     if (!q) return entities;
 
     return entities.filter((entity) => {
-      const any = entity as any;
+      const record = entity as Record<string, unknown>;
       const searchableText = cardConfig.searchFields
-        .map((f) => any[f] ?? "")
-        .concat(cardConfig.tagsField ? (any[cardConfig.tagsField] ?? []) : [])
+        .map((f) => getString(record[f]))
+        .concat(cardConfig.tagsField && Array.isArray(record[cardConfig.tagsField])
+          ? (record[cardConfig.tagsField] as string[])
+          : [])
         .join(" ")
         .toLowerCase();
 
@@ -179,7 +185,7 @@ export function EntityLibrary<T extends { id: string }>({
             placeholder={placeholderText}
           />
         </div>
-        <Button onClick={() => callbacks.onEdit?.(null as any)}>
+        <Button onClick={() => callbacks.onEdit?.(null)}>
           <Plus className="h-4 w-4" />
           {newButtonText}
         </Button>
@@ -194,8 +200,9 @@ export function EntityLibrary<T extends { id: string }>({
           </div>
         ) : (
           filtered.map((entity) => {
-            const any = entity as any;
-            const isSeed = (any.meta?.source ?? "") === "seed";
+            const record = entity as Record<string, unknown>;
+            const meta = record.meta as { source?: string } | undefined;
+            const isSeed = (meta?.source ?? "") === "seed";
             const hasResetButton = entityType === "persona";
 
             if (renderEntityCard) {

@@ -212,9 +212,9 @@ export function PersonaUpsertDialog(props: {
       setSummary(String(partial.summary ?? "").trim());
 
       setRole(String(partial.attributes?.role ?? "").trim());
-      setCompanySize(String((partial.attributes as any)?.company_size ?? "").trim());
-      setResponsibility(String((partial.attributes as any)?.responsibility ?? "").trim());
-      setDecisionAuthority(String((partial.attributes as any)?.decision_authority ?? "").trim());
+      setCompanySize(String(partial.attributes?.company_size ?? "").trim());
+      setResponsibility(String(partial.attributes?.responsibility ?? "").trim());
+      setDecisionAuthority(String(partial.attributes?.decision_authority ?? "").trim());
 
       setAge(String(partial.demographics?.age ?? "").trim());
       setIncome(String(partial.demographics?.income ?? "").trim());
@@ -228,12 +228,12 @@ export function PersonaUpsertDialog(props: {
       setPainPoints((partial.painPoints ?? []).join("\n"));
       setBuyingBehavior((partial.buyingBehavior ?? []).join("\n"));
 
-      setGoals(((partial as any).goals ?? []).join("\n"));
-      setJobsToBeDone(((partial as any).jobsToBeDone ?? []).join("\n"));
-      setDecisionCriteria(((partial as any).decisionCriteria ?? []).join("\n"));
-      setObjections(((partial as any).objections ?? []).join("\n"));
-      setChannels(((partial as any).channels ?? []).join("\n"));
-      setPreferredContent(((partial as any).preferredContent ?? []).join("\n"));
+      setGoals((partial.goals ?? []).join("\n"));
+      setJobsToBeDone((partial.jobsToBeDone ?? []).join("\n"));
+      setDecisionCriteria((partial.decisionCriteria ?? []).join("\n"));
+      setObjections((partial.objections ?? []).join("\n"));
+      setChannels((partial.channels ?? []).join("\n"));
+      setPreferredContent((partial.preferredContent ?? []).join("\n"));
 
       setTab("manual");
     } catch (e) {
@@ -259,7 +259,10 @@ export function PersonaUpsertDialog(props: {
           </div>
         )}
 
-        <Tabs value={tab} onValueChange={(v) => setTab(v as any)}>
+        <Tabs
+          value={tab}
+          onValueChange={(value) => setTab(value === "ai" ? "ai" : "manual")}
+        >
           <TabsList>
             <TabsTrigger value="manual">Manual</TabsTrigger>
             <TabsTrigger value="ai">AI builder</TabsTrigger>

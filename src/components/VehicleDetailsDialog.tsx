@@ -133,7 +133,7 @@ export function VehicleDetailsDialog(props: {
       entity={vehicle}
       entity_type="vehicle"
       title={vehicle.name}
-      subtitle={subtitle as any}
+      subtitle={subtitle}
       sections={sections}
       isSelected={isSelected}
       onToggleSelect={onToggleSelect}

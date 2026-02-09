@@ -2,6 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, BarChart, Bar, Cell } from 'recharts';
+import type { TooltipProps } from 'recharts';
 import { TrendingUp, Download, DollarSign, Target } from "lucide-react";
 
 import { PerceivedValue } from "@/lib/maxdiff-engine";
@@ -101,9 +102,19 @@ export const ResultsVisualization = ({ results }: ResultsVisualizationProps) => 
     window.URL.revokeObjectURL(url);
   };
 
-  const CustomTooltip = ({ active, payload }: any) => {
+  type TooltipPayload = {
+    featureName: string;
+    featureId: string;
+    materialCost: number;
+    perceivedValue: number;
+  };
+
+  const CustomTooltip = ({ active, payload }: TooltipProps<number, string>) => {
+    const data = payload?.[0]?.payload as TooltipPayload | undefined;
     if (active && payload && payload.length) {
-      const data = payload[0].payload;
+      if (!data) {
+        return null;
+      }
       const ratio = data.perceivedValue / data.materialCost;
       return (
         <div className="bg-card border rounded-lg p-3 shadow-lg">

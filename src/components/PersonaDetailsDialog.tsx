@@ -47,7 +47,7 @@ export function PersonaDetailsDialog(props: {
         {
           key: "traits",
           label: "Traits",
-          render: (val: string[]) => val ?? [],
+          render: (val) => (Array.isArray(val) ? val : []),
         },
       ],
       isList: true,
@@ -55,18 +55,11 @@ export function PersonaDetailsDialog(props: {
     {
       value: "demographics",
       title: "Demographics",
-      fields: [
-        { key: "age", label: "Age", render: (v) => v ?? "—" },
-        { key: "income", label: "Income", render: (v) => v ?? "—" },
-        { key: "family", label: "Family", render: (v) => v ?? "—" },
-        { key: "location", label: "Location", render: (v) => v ?? "—" },
-      ]
-        .map(f => ({
-          ...f,
-          key: `demographics.${f.key}`,
-          render: (v: any) => persona.demographics?.[f.key.split('.')[1]] ?? "—",
-        }))
-        .slice(0, 4),
+      fields: (["age", "income", "family", "location"] as const).map((key) => ({
+        key: `demographics.${key}`,
+        label: key.charAt(0).toUpperCase() + key.slice(1),
+        render: () => persona.demographics?.[key] ?? "—",
+      })),
     },
     {
       value: "attributes",
@@ -75,9 +68,12 @@ export function PersonaDetailsDialog(props: {
         {
           key: "attributes",
           label: "Attributes",
-          render: (attrs: any) => {
-            if (!attrs || !Object.keys(attrs).length) return "—";
-            return Object.entries(attrs)
+          render: (attrs) => {
+            if (!attrs || typeof attrs !== "object") return "—";
+            const entries = Object.entries(attrs as Record<string, unknown>);
+            if (!entries.length) return "—";
+            return entries
+              .filter(([, value]) => value != null && value !== "")
               .map(([k, v]) => `${k}: ${v}`)
               .join("\n");
           },
@@ -91,7 +87,7 @@ export function PersonaDetailsDialog(props: {
         {
           key: "motivations",
           label: "Motivations",
-          render: (val: string[]) => val ?? [],
+          render: (val) => (Array.isArray(val) ? val : []),
         },
       ],
       isList: true,
@@ -103,7 +99,7 @@ export function PersonaDetailsDialog(props: {
         {
           key: "painPoints",
           label: "Pain points",
-          render: (val: string[]) => val ?? [],
+          render: (val) => (Array.isArray(val) ? val : []),
         },
       ],
       isList: true,
@@ -115,7 +111,7 @@ export function PersonaDetailsDialog(props: {
         {
           key: "buyingBehavior",
           label: "Buying behavior",
-          render: (val: string[]) => val ?? [],
+          render: (val) => (Array.isArray(val) ? val : []),
         },
       ],
       isList: true,
@@ -124,12 +120,12 @@ export function PersonaDetailsDialog(props: {
       value: "marketing",
       title: "Marketing fields",
       fields: [
-        { key: "goals", label: "Goals", render: (v: string[]) => v ?? [] },
-        { key: "jobsToBeDone", label: "Jobs to be done", render: (v: string[]) => v ?? [] },
-        { key: "decisionCriteria", label: "Decision criteria", render: (v: string[]) => v ?? [] },
-        { key: "objections", label: "Objections", render: (v: string[]) => v ?? [] },
-        { key: "channels", label: "Channels", render: (v: string[]) => v ?? [] },
-        { key: "preferredContent", label: "Preferred content", render: (v: string[]) => v ?? [] },
+        { key: "goals", label: "Goals", render: (val) => (Array.isArray(val) ? val : []) },
+        { key: "jobsToBeDone", label: "Jobs to be done", render: (val) => (Array.isArray(val) ? val : []) },
+        { key: "decisionCriteria", label: "Decision criteria", render: (val) => (Array.isArray(val) ? val : []) },
+        { key: "objections", label: "Objections", render: (val) => (Array.isArray(val) ? val : []) },
+        { key: "channels", label: "Channels", render: (val) => (Array.isArray(val) ? val : []) },
+        { key: "preferredContent", label: "Preferred content", render: (val) => (Array.isArray(val) ? val : []) },
       ],
     },
   ];
@@ -141,7 +137,7 @@ export function PersonaDetailsDialog(props: {
       entity={persona}
       entity_type="persona"
       title={persona.name}
-      subtitle={subtitle as any}
+      subtitle={subtitle}
       sections={sections}
       isSelected={isSelected}
       onToggleSelect={onToggleSelect}

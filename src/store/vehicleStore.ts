@@ -35,8 +35,9 @@ export const useVehicleStore = create<VehicleState>((set, get) => ({
     try {
       const vehicles = await listVehicles();
       set({ vehicles, loading: false });
-    } catch (e: any) {
-      set({ error: e.message ?? "Unknown error", loading: false });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Unknown error";
+      set({ error: message, loading: false });
     }
   },
 
