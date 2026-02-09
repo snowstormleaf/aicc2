@@ -42,7 +42,7 @@ ${featuresBlock}
 
 Recommend (in USD) a minimum and maximum voucher discount, and how many distinct voucher levels to include.
 Respond with **pure JSON only**, for example:
-{\"min_discount\":10,\"max_discount\":200,\"levels\":6}`;
+{"min_discount":10,"max_discount":200,"levels":6}`;
 };
 
 export const buildSystemPrompt = (persona: PersonaProfile): string => {

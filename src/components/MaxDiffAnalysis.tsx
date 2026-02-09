@@ -42,17 +42,6 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
   const { personasById, getPersonaName } = usePersonas();
   const { vehiclesById } = useVehicles();
 
-  // Defensive guards: ensure prerequisites are present to avoid runtime crashes
-  if (!selectedVehicle || selectedPersonas.length === 0 || features.length === 0) {
-    return (
-      <Card className="p-6">
-        <p className="text-center text-muted-foreground">
-          Please select at least one persona, a vehicle, and upload features before running analysis.
-        </p>
-      </Card>
-    );
-  }
-
   useEffect(() => {
     const storedKey = localStorage.getItem('openai_api_key');
     if (storedKey) {
@@ -124,7 +113,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
     const seenIds = new Set<string>();
     return items.map((f, idx) => {
       let baseId = (f.id || f.name.toLowerCase().replace(/\s+/g, '-'));
-      baseId = baseId.replace(/[^a-z0-9\-]/g, '').toLowerCase() || `feature-${idx}`;
+      baseId = baseId.replace(/[^a-z0-9-]/g, '').toLowerCase() || `feature-${idx}`;
       let id = baseId;
       let i = 1;
       while (seenIds.has(id)) {
@@ -221,6 +210,17 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
       totalCalls
     };
   }, [features, personasById, selectedModel, selectedPersonas, selectedVehicle, serviceTier, useCache, vehiclesById]);
+
+  // Defensive guards: ensure prerequisites are present to avoid runtime crashes
+  if (!selectedVehicle || selectedPersonas.length === 0 || features.length === 0) {
+    return (
+      <Card className="p-6">
+        <p className="text-center text-muted-foreground">
+          Please select at least one persona, a vehicle, and upload features before running analysis.
+        </p>
+      </Card>
+    );
+  }
 
   const runAnalysis = async () => {
     if (!hasApiKey) {

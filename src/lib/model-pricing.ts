@@ -57,4 +57,7 @@ export const getStoredModelConfig = () => {
   return { serviceTier, model };
 };
 
-export const formatPrice = (value: number) => `$${value.toFixed(3).replace(/\.0+$/, '')}`;
+export const formatPrice = (value: number) => {
+  const formatted = value.toFixed(4).replace(/0+$/, '');
+  return `$${formatted.endsWith('.') ? formatted.slice(0, -1) : formatted}`;
+};
