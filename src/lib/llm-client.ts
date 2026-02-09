@@ -4,6 +4,7 @@ export interface LLMConfig {
   apiKey: string;
   model?: string;
   reasoningModel?: string;
+  serviceTier?: 'standard' | 'flex';
   maxRetries?: number;
   temperature?: number;
   useGPT?: boolean;
@@ -30,6 +31,78 @@ export interface PersonaProfile {
   buyingBehavior: string[];
 }
 
+export const buildVoucherPrompt = (featureDescriptions: Map<string, string>): string => {
+  const featuresBlock = Array.from(featureDescriptions.entries())
+    .map(([title, desc]) => `- ${title}: ${desc || 'No description available'}`)
+    .join('\n');
+
+  return `You are an automotive pricing expert. You have to estimate what is the conservative boundaries for the willingness-to-pay for these feature individually max and min:
+
+${featuresBlock}
+
+Recommend (in USD) a minimum and maximum voucher discount, and how many distinct voucher levels to include.
+Respond with **pure JSON only**, for example:
+{"min_discount":10,"max_discount":200,"levels":6}`;
+};
+
+export const buildSystemPrompt = (persona: PersonaProfile): string => {
+  return `You are a ${persona.name} persona with the following characteristics:
+
+DEMOGRAPHICS:
+- Age: ${persona.demographics.age}
+- Income: ${persona.demographics.income}
+- Family: ${persona.demographics.family}
+- Location: ${persona.demographics.location}
+
+MOTIVATIONS:
+${persona.motivations.map(m => `- ${m}`).join('\n')}
+
+PAIN POINTS:
+${persona.painPoints.map(p => `- ${p}`).join('\n')}
+
+BUYING BEHAVIOR:
+${persona.buyingBehavior.map(b => `- ${b}`).join('\n')}
+
+INSTRUCTIONS:
+- Think and respond ONLY as this persona
+- Consider your specific needs, budget constraints, and priorities
+- Make decisions based on your demographic profile and motivations
+- Do NOT reveal your thought process or mention that you are an AI
+- Be consistent with your persona's characteristics throughout
+- Focus on practical value from your persona's perspective
+
+CRITICAL: You must use the rank_value function to provide your response. Do not provide explanations outside the function call.`;
+};
+
+export const buildUserPrompt = (
+  set: MaxDiffSet,
+  vehicle: { brand: string; name: string },
+  featureDescriptions: Map<string, string>
+): string => {
+  const optionsText = set.options.map((option, index) => {
+    const description = featureDescriptions.get(option.id) || option.description || 'No description available';
+    return `${index + 1}. ${option.name} (ID: ${option.id})
+   ${description}`;
+  }).join('\n\n');
+
+  return `You are considering purchasing a ${vehicle.brand} ${vehicle.name} and need to evaluate these 4 options:
+
+${optionsText}
+
+As a ${featureDescriptions.get('persona_name') || 'buyer'}, please rank these options from MOST valuable to LEAST valuable to you personally.
+
+Consider:
+- Which option would be most important for your specific needs?
+- Which option would you be least willing to pay extra for?
+- How do these options align with your priorities and budget?
+
+Use the rank_value function to provide:
+1. mostValued: The ID of your most preferred option
+2. leastValued: The ID of your least preferred option  
+3. ranking: All 4 option IDs ordered from most to least valuable
+4. reasoning: Brief explanation of your decision (1-2 sentences)`;
+};
+
 export class LLMClient {
   private config: LLMConfig;
 
@@ -37,6 +110,7 @@ export class LLMClient {
     this.config = {
       model: 'gpt-4.1-mini-2025-04-14',
       reasoningModel: 'o4-mini-2025-04-16',
+      serviceTier: 'standard',
       maxRetries: 3,
       temperature: 0.2,
       useGPT: true,
@@ -50,17 +124,7 @@ export class LLMClient {
     defaultMax: number = 200,
     defaultLevels: number = 6
   ): Promise<VoucherBounds> {
-    const featuresBlock = Array.from(featureDescriptions.entries())
-      .map(([title, desc]) => `- ${title}: ${desc}`)
-      .join('\n');
-
-    const prompt = `You are an automotive pricing expert. You have to estimate what is the conservative boundaries for the willingness-to-pay for these feature individually max and min:
-
-${featuresBlock}
-
-Recommend (in USD) a minimum and maximum voucher discount, and how many distinct voucher levels to include.
-Respond with **pure JSON only**, for example:
-{"min_discount":10,"max_discount":200,"levels":6}`;
+    const prompt = buildVoucherPrompt(featureDescriptions);
 
     try {
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -71,6 +135,7 @@ Respond with **pure JSON only**, for example:
         },
         body: JSON.stringify({
           model: this.config.reasoningModel,
+          service_tier: this.config.serviceTier === 'flex' ? 'flex' : 'auto',
           messages: [
             { role: 'system', content: 'You are an automotive pricing expert.' },
             { role: 'user', content: prompt }
@@ -125,8 +190,8 @@ Respond with **pure JSON only**, for example:
     vehicle: { brand: string; name: string },
     featureDescriptions: Map<string, string>
   ): Promise<RawResponse> {
-    const systemPrompt = this.buildSystemPrompt(persona);
-    const userPrompt = this.buildUserPrompt(set, vehicle, featureDescriptions);
+    const systemPrompt = buildSystemPrompt(persona);
+    const userPrompt = buildUserPrompt(set, vehicle, featureDescriptions);
 
     for (let attempt = 1; attempt <= this.config.maxRetries!; attempt++) {
       try {
@@ -138,6 +203,7 @@ Respond with **pure JSON only**, for example:
           },
           body: JSON.stringify({
             model: this.config.model,
+            service_tier: this.config.serviceTier === 'flex' ? 'flex' : 'auto',
             messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: userPrompt }
@@ -211,64 +277,6 @@ Respond with **pure JSON only**, for example:
 
     // This should never be reached, but TypeScript requires it
     return this.generateRandomResponse(set, persona);
-  }
-
-  private buildSystemPrompt(persona: PersonaProfile): string {
-    return `You are a ${persona.name} persona with the following characteristics:
-
-DEMOGRAPHICS:
-- Age: ${persona.demographics.age}
-- Income: ${persona.demographics.income}
-- Family: ${persona.demographics.family}
-- Location: ${persona.demographics.location}
-
-MOTIVATIONS:
-${persona.motivations.map(m => `- ${m}`).join('\n')}
-
-PAIN POINTS:
-${persona.painPoints.map(p => `- ${p}`).join('\n')}
-
-BUYING BEHAVIOR:
-${persona.buyingBehavior.map(b => `- ${b}`).join('\n')}
-
-INSTRUCTIONS:
-- Think and respond ONLY as this persona
-- Consider your specific needs, budget constraints, and priorities
-- Make decisions based on your demographic profile and motivations
-- Do NOT reveal your thought process or mention that you are an AI
-- Be consistent with your persona's characteristics throughout
-- Focus on practical value from your persona's perspective
-
-CRITICAL: You must use the rank_value function to provide your response. Do not provide explanations outside the function call.`;
-  }
-
-  private buildUserPrompt(
-    set: MaxDiffSet,
-    vehicle: { brand: string; name: string },
-    featureDescriptions: Map<string, string>
-  ): string {
-    const optionsText = set.options.map((option, index) => {
-      const description = featureDescriptions.get(option.id) || option.description || 'No description available';
-      return `${index + 1}. ${option.name} (ID: ${option.id})
-   ${description}`;
-    }).join('\n\n');
-
-    return `You are considering purchasing a ${vehicle.brand} ${vehicle.name} and need to evaluate these 4 options:
-
-${optionsText}
-
-As a ${featureDescriptions.get('persona_name') || 'buyer'}, please rank these options from MOST valuable to LEAST valuable to you personally.
-
-Consider:
-- Which option would be most important for your specific needs?
-- Which option would you be least willing to pay extra for?
-- How do these options align with your priorities and budget?
-
-Use the rank_value function to provide:
-1. mostValued: The ID of your most preferred option
-2. leastValued: The ID of your least preferred option  
-3. ranking: All 4 option IDs ordered from most to least valuable
-4. reasoning: Brief explanation of your decision (1-2 sentences)`;
   }
 
   private generateRandomResponse(set: MaxDiffSet, persona: PersonaProfile): RawResponse {

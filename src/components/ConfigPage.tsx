@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { ApiKeyInput } from './ApiKeyInput';
-import { Key, Brain, Zap, CheckCircle } from 'lucide-react';
+import { ModelSettings } from './ModelSettings';
+import { Key, Brain, Zap, CheckCircle, SlidersHorizontal } from 'lucide-react';
 
 interface ConfigPageProps {
   onClose?: () => void;
@@ -68,6 +69,14 @@ export const ConfigPage = ({ onClose }: ConfigPageProps) => {
           </div>
         </div>
       )
+    },
+    {
+      id: 'model',
+      title: 'Model & Service Tier',
+      description: 'Choose the model and processing tier for analysis calls',
+      icon: SlidersHorizontal,
+      status: 'configured',
+      component: <ModelSettings />
     },
     {
       id: 'performance',

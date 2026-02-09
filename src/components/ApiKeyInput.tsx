@@ -130,7 +130,7 @@ export const ApiKeyInput = ({ onApiKeySet, hasApiKey }: ApiKeyInputProps) => {
 
         <Alert>
           <AlertDescription className="text-xs text-muted-foreground">
-            The analysis will make multiple API calls to OpenAI. Estimated cost: $2-10 depending on the number of features.
+            The analysis will make multiple API calls to OpenAI. Estimated costs are shown in the analysis setup based on your selected model and service tier.
           </AlertDescription>
         </Alert>
       </CardContent>
