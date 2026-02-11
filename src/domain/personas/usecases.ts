@@ -36,6 +36,7 @@ export function normalizePersona(p: CustomerPersona, fallbackSource: PersonaSour
     buyingBehavior: ensureStringArray(p.buyingBehavior),
 
     summary: p.summary?.trim() || undefined,
+    brand: String(p.brand ?? "").trim() || "Unknown",
     traits: ensureStringArray(p.traits),
     tags: ensureStringArray(p.tags),
 

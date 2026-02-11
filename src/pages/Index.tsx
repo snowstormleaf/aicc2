@@ -84,11 +84,6 @@ const Index = () => {
             selectedPersonas={selectedPersonas}
             onPersonaSelect={(personas) => {
               setSelectedPersonas(personas);
-              if (selectedVehicle && features.length === 0 && personas.length > 0) {
-                setTimeout(() => setCurrentStep('upload'), 500);
-              } else if (selectedVehicle && personas.length > 0) {
-                setTimeout(() => setCurrentStep('vehicle'), 500);
-              }
             }}
           />
         );
@@ -98,9 +93,6 @@ const Index = () => {
             selectedVehicle={selectedVehicle}
             onSelectVehicle={(vehicle) => {
               setSelectedVehicle(vehicle);
-              if (selectedPersonas.length > 0 && features.length === 0) {
-                setTimeout(() => setCurrentStep('upload'), 500);
-              }
             }}
           />
         );
@@ -124,7 +116,6 @@ const Index = () => {
             onAnalysisComplete={(results, logs) => {
               setAnalysisResults(results);
               setCallLogs(logs);
-              setTimeout(() => setCurrentStep('results'), 1000);
             }}
             onEditAnalysisParameters={() => {
               setWorkspaceTab('design');

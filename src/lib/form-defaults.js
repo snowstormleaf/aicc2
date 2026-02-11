@@ -36,6 +36,7 @@ export const buildPersonaFormDefaults = (initial) => ({
  */
 export const buildVehicleFormDefaults = (initial) => ({
   name: initial?.name ?? "",
+  brand: initial?.brand ?? initial?.manufacturer ?? "",
   manufacturer: initial?.manufacturer ?? "",
   model: initial?.model ?? "",
   year: initial?.year ? String(initial.year) : "",

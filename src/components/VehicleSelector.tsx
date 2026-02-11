@@ -7,6 +7,7 @@ import { useVehicles } from "@/vehicles/store";
 import { VehicleDetailsDialog } from "@/components/VehicleDetailsDialog";
 import { VehicleUpsertDialog } from "@/components/VehicleUpsertDialog";
 import type { Vehicle } from "@/types/vehicle";
+import { useWorkspaceStore } from "@/store/workspaceStore";
 
 interface VehicleSelectorProps {
   selectedVehicle: string | null;
@@ -15,6 +16,7 @@ interface VehicleSelectorProps {
 
 export const VehicleSelector = ({ selectedVehicle, onSelectVehicle }: VehicleSelectorProps) => {
   const { vehicles, getVehicleName, upsertVehicle } = useVehicles();
+  const appliedBrands = useWorkspaceStore((state) => state.appliedBrands);
 
   const [detailsOpen, setDetailsOpen] = React.useState(false);
   const [detailsId, setDetailsId] = React.useState<string | null>(null);
@@ -33,6 +35,10 @@ export const VehicleSelector = ({ selectedVehicle, onSelectVehicle }: VehicleSel
   };
 
   const currentVehicle = detailsId ? vehicles.find(v => v.id === detailsId) ?? null : null;
+  const normalizedBrandSet = new Set(appliedBrands.map((brand) => brand.trim().toLowerCase()));
+  const filteredVehicles = normalizedBrandSet.size > 0
+    ? vehicles.filter((vehicle) => normalizedBrandSet.has((vehicle.brand ?? vehicle.manufacturer ?? "Unknown").trim().toLowerCase()))
+    : vehicles;
 
   if (vehicles.length === 0) {
     return (
@@ -59,7 +65,7 @@ export const VehicleSelector = ({ selectedVehicle, onSelectVehicle }: VehicleSel
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {vehicles.map((vehicle) => {
+        {filteredVehicles.map((vehicle) => {
           const isSelected = selectedVehicle === vehicle.id;
 
           return (
@@ -153,6 +159,12 @@ export const VehicleSelector = ({ selectedVehicle, onSelectVehicle }: VehicleSel
           );
         })}
       </div>
+
+      {filteredVehicles.length === 0 && normalizedBrandSet.size > 0 && (
+        <div className="text-center p-6 border rounded-lg text-sm text-muted-foreground">
+          No vehicles found for selected brand filter. Update filters in Workspace.
+        </div>
+      )}
 
       {selectedVehicle && (
         <div className="mt-6 p-4 bg-muted rounded-lg">

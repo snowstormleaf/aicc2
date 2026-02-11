@@ -3,7 +3,6 @@ import { Menu, Settings, Users, Car, SlidersHorizontal, Filter } from "lucide-re
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { ConfigPage } from "./ConfigPage";
 import { PersonaLibrary } from "./PersonaLibrary";
@@ -11,6 +10,8 @@ import { VehicleLibrary } from "@/components/vehicles/VehicleLibrary";
 import { DesignParametersPanel } from "./DesignParametersPanel";
 import { usePersonas } from "@/personas/store";
 import { useWorkspaceStore } from "@/store/workspaceStore";
+import { useVehicles } from "@/vehicles/store";
+import { Checkbox } from "@/components/ui/checkbox";
 
 interface BurgerMenuProps {
   open?: boolean;
@@ -24,18 +25,27 @@ export const BurgerMenu = ({ open, onOpenChange, activeTab, onTabChange, feature
   const [isOpen, setIsOpen] = useState(false);
   const [tabValue, setTabValue] = useState("config");
   const { personas } = usePersonas();
-  const selectedBrand = useWorkspaceStore((state) => state.selectedBrand);
-  const setSelectedBrand = useWorkspaceStore((state) => state.setSelectedBrand);
+  const { vehicles } = useVehicles();
+  const selectedBrandsDraft = useWorkspaceStore((state) => state.selectedBrandsDraft);
+  const appliedBrands = useWorkspaceStore((state) => state.appliedBrands);
+  const setSelectedBrandsDraft = useWorkspaceStore((state) => state.setSelectedBrandsDraft);
+  const applyBrandFilter = useWorkspaceStore((state) => state.applyBrandFilter);
+  const clearBrandFilter = useWorkspaceStore((state) => state.clearBrandFilter);
 
   const brandOptions = useMemo(() => {
     const brands = new Set<string>();
-    personas.forEach((persona) => {
-      if (persona.brand) {
-        brands.add(persona.brand);
-      }
-    });
+    personas.forEach((persona) => brands.add((persona.brand ?? "Unknown").trim() || "Unknown"));
+    vehicles.forEach((vehicle) => brands.add((vehicle.brand ?? vehicle.manufacturer ?? "Unknown").trim() || "Unknown"));
     return Array.from(brands).sort((a, b) => a.localeCompare(b));
-  }, [personas]);
+  }, [personas, vehicles]);
+
+  const toggleDraftBrand = (brand: string) => {
+    if (selectedBrandsDraft.includes(brand)) {
+      setSelectedBrandsDraft(selectedBrandsDraft.filter((item) => item !== brand));
+      return;
+    }
+    setSelectedBrandsDraft([...selectedBrandsDraft, brand]);
+  };
 
   const isMenuOpen = open ?? isOpen;
   const setMenuOpen = onOpenChange ?? setIsOpen;
@@ -95,24 +105,38 @@ export const BurgerMenu = ({ open, onOpenChange, activeTab, onTabChange, feature
               <div>
                 <Label className="text-sm font-medium">Brand filter</Label>
                 <p className="text-xs text-muted-foreground mb-2">
-                  Filters the persona list in the analysis workflow only. Persona Library remains unfiltered.
+                  Select brands, then click Apply Filter. Workflow selectors are filtered; libraries remain unfiltered.
                 </p>
-                <Select
-                  value={selectedBrand || "all"}
-                  onValueChange={(value) => setSelectedBrand(value === "all" ? "" : value)}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="All brands" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All brands</SelectItem>
+                <div className="space-y-3 rounded-md border p-3">
+                  <div className="max-h-56 space-y-2 overflow-auto pr-1">
                     {brandOptions.map((brand) => (
-                      <SelectItem key={brand} value={brand}>
-                        {brand}
-                      </SelectItem>
+                      <label key={brand} className="flex items-center gap-2 text-sm">
+                        <Checkbox
+                          checked={selectedBrandsDraft.includes(brand)}
+                          onCheckedChange={() => toggleDraftBrand(brand)}
+                          aria-label={`Filter by ${brand}`}
+                        />
+                        <span>{brand}</span>
+                      </label>
                     ))}
-                  </SelectContent>
-                </Select>
+                    {brandOptions.length === 0 && (
+                      <p className="text-xs text-muted-foreground">No brands found in persona or vehicle data.</p>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={applyBrandFilter} disabled={selectedBrandsDraft.length === 0}>
+                      Apply filter
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={clearBrandFilter}>
+                      All brands
+                    </Button>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground">
+                    Applied: {appliedBrands.length > 0 ? appliedBrands.join(", ") : "All brands"}
+                  </p>
+                </div>
               </div>
             </TabsContent>
 

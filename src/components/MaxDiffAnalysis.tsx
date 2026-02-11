@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { Brain, DollarSign, CheckCircle, AlertCircle, SlidersHorizontal } from "lucide-react";
+import { Brain, CheckCircle, AlertCircle, SlidersHorizontal } from "lucide-react";
 import { MaxDiffEngine, PerceivedValue } from "@/lib/maxdiff-engine";
 import { buildSystemPrompt, buildUserPrompt, buildVoucherPrompt, LLMClient } from "@/lib/llm-client";
 import { usePersonas } from "@/personas/store";
@@ -416,7 +416,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         </Alert>
       )}
 
-      <div className="grid gap-6 md:grid-cols-2">
+      <div>
         <Card>
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
@@ -487,25 +487,6 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                 )}
               </div>
             )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <DollarSign className="h-5 w-5 text-primary" />
-              Expected Output
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="text-sm">
-              <p className="font-medium mb-1">Feature Values</p>
-              <p className="text-muted-foreground">Perceived value vs material cost analysis</p>
-            </div>
-            <div className="text-sm">
-              <p className="font-medium mb-1">Scatter Plot</p>
-              <p className="text-muted-foreground">Visual representation of value-cost relationships</p>
-            </div>
           </CardContent>
         </Card>
       </div>

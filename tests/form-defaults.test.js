@@ -47,6 +47,7 @@ describe("form defaults", () => {
     const defaults = buildVehicleFormDefaults({
       id: "vehicle-1",
       name: "Transit",
+      brand: "Ford",
       manufacturer: "Ford",
       model: "Custom",
       year: 2024,
@@ -57,9 +58,20 @@ describe("form defaults", () => {
     });
 
     assert.equal(defaults.name, "Transit");
+    assert.equal(defaults.brand, "Ford");
     assert.equal(defaults.manufacturer, "Ford");
     assert.equal(defaults.model, "Custom");
     assert.equal(defaults.year, "2024");
     assert.equal(defaults.tags, "Tag A");
+  });
+
+  it("falls back vehicle brand from manufacturer when brand is missing", () => {
+    const defaults = buildVehicleFormDefaults({
+      id: "vehicle-2",
+      name: "Artura",
+      manufacturer: "McLaren",
+    });
+
+    assert.equal(defaults.brand, "McLaren");
   });
 });

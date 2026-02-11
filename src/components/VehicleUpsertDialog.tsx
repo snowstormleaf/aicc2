@@ -47,6 +47,7 @@ Return ONLY a single JSON object (no markdown) with this shape:
 
 {
   "name": "string",
+  "brand": "string",
   "manufacturer": "string",
   "model": "string",
   "year": number,
@@ -98,6 +99,7 @@ export function VehicleUpsertDialog(props: {
   const initialDefaults = React.useMemo(() => buildVehicleFormDefaults(initial), [initial]);
 
   const [name, setName] = React.useState(initialDefaults.name);
+  const [brand, setBrand] = React.useState(initialDefaults.brand);
   const [manufacturer, setManufacturer] = React.useState(initialDefaults.manufacturer);
   const [model, setModel] = React.useState(initialDefaults.model);
   const [year, setYear] = React.useState(initialDefaults.year);
@@ -114,6 +116,7 @@ export function VehicleUpsertDialog(props: {
     setTab("manual");
     const defaults = buildVehicleFormDefaults(initial);
     setName(defaults.name);
+    setBrand(defaults.brand);
     setManufacturer(defaults.manufacturer);
     setModel(defaults.model);
     setYear(defaults.year);
@@ -133,6 +136,7 @@ export function VehicleUpsertDialog(props: {
     const vehicle: Vehicle = {
       id: initial?.id ?? newIdFromName(finalName),
       name: finalName,
+      brand: brand.trim() || manufacturer.trim() || "Unknown",
       manufacturer: manufacturer.trim() || undefined,
       model: model.trim() || undefined,
       year: year.trim() ? Number(year.trim()) : undefined,
@@ -164,6 +168,7 @@ export function VehicleUpsertDialog(props: {
       const result = await aiGenerateVehicle(apiKey, finalBrief);
 
       setName(result.name ?? "");
+      setBrand(result.brand ?? result.manufacturer ?? "");
       setManufacturer(result.manufacturer ?? "");
       setModel(result.model ?? "");
       setYear(result.year ? String(result.year) : "");
@@ -220,6 +225,15 @@ export function VehicleUpsertDialog(props: {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
+                <Label htmlFor="vehicle-brand">Brand</Label>
+                <Input
+                  id="vehicle-brand"
+                  value={brand}
+                  onChange={(e) => setBrand(e.target.value)}
+                  placeholder="e.g. McLaren"
+                />
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="vehicle-manufacturer">Manufacturer</Label>
                 <Input
                   id="vehicle-manufacturer"
@@ -228,7 +242,7 @@ export function VehicleUpsertDialog(props: {
                   placeholder="e.g. Mercedes"
                 />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-2 col-span-2 md:col-span-1">
                 <Label htmlFor="vehicle-model">Model</Label>
                 <Input
                   id="vehicle-model"

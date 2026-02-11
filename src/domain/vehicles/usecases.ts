@@ -12,6 +12,7 @@ export function normalizeVehicle(v: Vehicle): Vehicle {
     ...v,
     name: String(v.name ?? "").trim() || "Untitled Vehicle",
     id: String(v.id ?? "").trim() || `vehicle_${Math.random().toString(16).slice(2)}`,
+    brand: String(v.brand ?? v.manufacturer ?? "").trim() || "Unknown",
     manufacturer: String(v.manufacturer ?? "").trim() || undefined,
     model: String(v.model ?? "").trim() || undefined,
     year: v.year ? Number(v.year) : undefined,

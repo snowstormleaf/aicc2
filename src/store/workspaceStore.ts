@@ -1,11 +1,17 @@
 import { create } from "zustand";
 
 type WorkspaceState = {
-  selectedBrand: string;
-  setSelectedBrand: (brand: string) => void;
+  selectedBrandsDraft: string[];
+  appliedBrands: string[];
+  setSelectedBrandsDraft: (brands: string[]) => void;
+  applyBrandFilter: () => void;
+  clearBrandFilter: () => void;
 };
 
 export const useWorkspaceStore = create<WorkspaceState>((set) => ({
-  selectedBrand: "",
-  setSelectedBrand: (brand) => set({ selectedBrand: brand }),
+  selectedBrandsDraft: [],
+  appliedBrands: [],
+  setSelectedBrandsDraft: (brands) => set({ selectedBrandsDraft: brands }),
+  applyBrandFilter: () => set((state) => ({ appliedBrands: [...state.selectedBrandsDraft] })),
+  clearBrandFilter: () => set({ selectedBrandsDraft: [], appliedBrands: [] }),
 }));

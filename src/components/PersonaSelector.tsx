@@ -23,7 +23,7 @@ interface PersonaSelectorProps {
 
 export const PersonaSelector = ({ selectedPersonas, onPersonaSelect }: PersonaSelectorProps) => {
   const { personas, personasById, getPersonaName, upsertPersona } = usePersonas();
-  const selectedBrand = useWorkspaceStore((state) => state.selectedBrand);
+  const appliedBrands = useWorkspaceStore((state) => state.appliedBrands);
 
   const [detailsOpen, setDetailsOpen] = React.useState(false);
   const [detailsId, setDetailsId] = React.useState<string | null>(null);
@@ -50,9 +50,9 @@ export const PersonaSelector = ({ selectedPersonas, onPersonaSelect }: PersonaSe
 
   const detailsPersona: CustomerPersona | null =
     detailsId ? personasById[detailsId] ?? null : null;
-  const normalizedBrand = selectedBrand.trim().toLowerCase();
-  const filteredPersonas = normalizedBrand
-    ? personas.filter((persona) => (persona.brand ?? "").toLowerCase() === normalizedBrand)
+  const normalizedBrandSet = new Set(appliedBrands.map((brand) => brand.trim().toLowerCase()));
+  const filteredPersonas = normalizedBrandSet.size > 0
+    ? personas.filter((persona) => normalizedBrandSet.has((persona.brand ?? "Unknown").trim().toLowerCase()))
     : personas;
 
   return (
@@ -137,20 +137,18 @@ export const PersonaSelector = ({ selectedPersonas, onPersonaSelect }: PersonaSe
                     <Eye className="h-4 w-4" />
                   </Button>
 
-                  {isSelected && (
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openEdit(persona);
-                      }}
-                      aria-label="Edit persona"
-                      title="Edit persona"
-                    >
-                      <Edit2 className="h-4 w-4" />
-                    </Button>
-                  )}
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openEdit(persona);
+                    }}
+                    aria-label={`Edit persona ${persona.name}`}
+                    title="Edit persona"
+                  >
+                    <Edit2 className="h-4 w-4" />
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -158,9 +156,9 @@ export const PersonaSelector = ({ selectedPersonas, onPersonaSelect }: PersonaSe
         })}
       </div>
 
-      {filteredPersonas.length === 0 && normalizedBrand && (
+      {filteredPersonas.length === 0 && normalizedBrandSet.size > 0 && (
         <div className="text-center p-6 border rounded-lg text-sm text-muted-foreground">
-          No personas found for brand "{selectedBrand}". Update the brand filter in Workspace.
+          No personas found for selected brand filter. Update filters in Workspace.
         </div>
       )}
 
