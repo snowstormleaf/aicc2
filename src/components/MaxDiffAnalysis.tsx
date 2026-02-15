@@ -2,10 +2,9 @@ import { useMemo, useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Badge } from "@/components/ui/badge";
-import { Brain, CheckCircle, AlertCircle, SlidersHorizontal } from "lucide-react";
+import { Brain, CheckCircle, AlertCircle, SlidersHorizontal, Users, Car, ListChecks, Cpu, Ticket, ReceiptText } from "lucide-react";
 import { MaxDiffEngine, PerceivedValue, RawResponse } from "@/lib/maxdiff-engine";
-import { buildSystemPrompt, buildUserPrompt, buildVoucherPrompt, LLMClient } from "@/lib/llm-client";
+import { buildSystemPrompt, buildUserPrompt, LLMClient } from "@/lib/llm-client";
 import { usePersonas } from "@/personas/store";
 import { useVehicles } from "@/vehicles/store";
 import { ApiKeyInput } from "./ApiKeyInput";
@@ -14,6 +13,11 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { buildAnalysisCacheKey } from "@/lib/analysis-cache";
 import type { MaxDiffCallLog } from "@/types/analysis";
+import {
+  ANALYSIS_SETTINGS_UPDATED_EVENT,
+  getStoredAnalysisSettings,
+  type AnalysisSettings,
+} from "@/lib/analysis-settings";
 
 interface Feature {
   id: string;
@@ -29,12 +33,6 @@ interface MaxDiffAnalysisProps {
   onAnalysisComplete: (results: Map<string, PerceivedValue[]>, callLogs: MaxDiffCallLog[]) => void;
   onEditAnalysisParameters?: () => void;
 }
-
-const DEFAULT_VOUCHER_BOUNDS = {
-  min_discount: 10,
-  max_discount: 200,
-  levels: 6,
-};
 
 const estimateTokens = (text: string) => Math.ceil(text.length / 4);
 
@@ -102,7 +100,8 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
   const [currentPersona, setCurrentPersona] = useState('');
   const [elapsedTime, setElapsedTime] = useState(0);
   const [eta, setEta] = useState(0);
-  const [useCache, setUseCache] = useState(false);
+  const [analysisSettings, setAnalysisSettings] = useState<AnalysisSettings>(() => getStoredAnalysisSettings());
+  const [useCache, setUseCache] = useState(() => getStoredAnalysisSettings().defaultUseCache);
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
   const [serviceTier, setServiceTier] = useState(DEFAULT_SERVICE_TIER);
   const { toast } = useToast();
@@ -111,9 +110,13 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
   const { vehiclesById } = useVehicles();
 
   const engineFeatures = useMemo(() => buildEngineFeatures(features), [features]);
-  const estimatedPlan = useMemo(
-    () => buildAnalysisPlan(engineFeatures, DEFAULT_VOUCHER_BOUNDS),
+  const voucherPolicyBounds = useMemo(
+    () => MaxDiffEngine.deriveVoucherBounds(engineFeatures.map((feature) => feature.materialCost)),
     [engineFeatures]
+  );
+  const estimatedPlan = useMemo(
+    () => buildAnalysisPlan(engineFeatures, voucherPolicyBounds),
+    [engineFeatures, voucherPolicyBounds]
   );
   const totalSets = estimatedPlan.maxDiffSets.length;
 
@@ -132,12 +135,23 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
       setServiceTier(stored.serviceTier);
     };
 
+    const updateAnalysisSettings = () => {
+      const stored = getStoredAnalysisSettings();
+      setAnalysisSettings(stored);
+      setUseCache(stored.defaultUseCache);
+    };
+
     updateModelConfig();
+    updateAnalysisSettings();
     window.addEventListener('model-config-updated', updateModelConfig);
+    window.addEventListener(ANALYSIS_SETTINGS_UPDATED_EVENT, updateAnalysisSettings);
     window.addEventListener('storage', updateModelConfig);
+    window.addEventListener('storage', updateAnalysisSettings);
     return () => {
       window.removeEventListener('model-config-updated', updateModelConfig);
+      window.removeEventListener(ANALYSIS_SETTINGS_UPDATED_EVENT, updateAnalysisSettings);
       window.removeEventListener('storage', updateModelConfig);
+      window.removeEventListener('storage', updateAnalysisSettings);
     };
   }, []);
 
@@ -184,13 +198,8 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
     const perCallInputTokens = avgSystemTokens + userTokens;
     const perCallOutputTokens = 200;
 
-    let inputTokens = Math.round(perCallInputTokens * totalCalls);
-    let outputTokens = Math.round(perCallOutputTokens * totalCalls);
-
-    const voucherPrompt = buildVoucherPrompt(new Map(engineFeatures.map((feature) => [feature.name, feature.description])));
-    const voucherInputTokens = estimateTokens('You are an automotive pricing expert.') + estimateTokens(voucherPrompt);
-    inputTokens += voucherInputTokens;
-    outputTokens += 80;
+    const inputTokens = Math.round(perCallInputTokens * totalCalls);
+    const outputTokens = Math.round(perCallOutputTokens * totalCalls);
 
     const pricing = MODEL_PRICING[serviceTier][selectedModel];
     const inputCost = (inputTokens / 1_000_000) * pricing.input;
@@ -205,7 +214,16 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
       outputTokens,
       totalCalls,
     };
-  }, [engineFeatures, estimatedPlan, personasById, selectedModel, selectedPersonas, selectedVehicle, serviceTier, useCache, vehiclesById]);
+  }, [
+    estimatedPlan,
+    personasById,
+    selectedModel,
+    selectedPersonas,
+    selectedVehicle,
+    serviceTier,
+    useCache,
+    vehiclesById,
+  ]);
 
   // Defensive guards: ensure prerequisites are present to avoid runtime crashes
   if (!selectedVehicle || selectedPersonas.length === 0 || features.length === 0) {
@@ -234,6 +252,9 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
     setCurrentSet(0);
     setElapsedTime(0);
     setEta(0);
+    if (!analysisSettings.showProgressUpdates) {
+      setAnalysisStatus('Running analysis...');
+    }
 
     const startTime = Date.now();
     let callsDone = 0;
@@ -297,15 +318,12 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         model: storedModelConfig.model,
         reasoningModel: storedModelConfig.model,
         serviceTier: storedModelConfig.serviceTier,
+        maxRetries: analysisSettings.maxRetries,
         useGPT: true,
-        temperature: 0.2,
+        temperature: analysisSettings.temperature,
       });
 
-      const featureDescriptions = new Map(
-        engineFeatures.map((feature) => [feature.name, feature.description])
-      );
-
-      const voucherBounds = await llmClient.recommendVoucherBounds(featureDescriptions);
+      const voucherBounds = voucherPolicyBounds;
       const analysisPlan = buildAnalysisPlan(engineFeatures, voucherBounds);
       const totalCalls = selectedPersonas.length * analysisPlan.maxDiffSets.length;
 
@@ -335,13 +353,17 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
           throw new Error(`Invalid persona ${personaId}`);
         }
 
-        setAnalysisStatus(`Starting analysis for ${personaId}...`);
+        if (analysisSettings.showProgressUpdates) {
+          setAnalysisStatus(`Starting analysis for ${personaId}...`);
+        }
         const responses: RawResponse[] = [];
 
         for (let index = 0; index < analysisPlan.maxDiffSets.length; index++) {
           const maxDiffSet = analysisPlan.maxDiffSets[index];
           setCurrentSet(index + 1);
-          setAnalysisStatus(`${personaId}: Analyzing set ${index + 1}/${analysisPlan.maxDiffSets.length}`);
+          if (analysisSettings.showProgressUpdates) {
+            setAnalysisStatus(`${personaId}: Analyzing set ${index + 1}/${analysisPlan.maxDiffSets.length}`);
+          }
 
           try {
             const timestamp = new Date().toISOString();
@@ -401,7 +423,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         results.set(personaId, perceivedValues);
 
         const cacheKey = cacheKeyByPersona.get(personaId);
-        if (cacheKey) {
+        if (analysisSettings.persistResults && cacheKey) {
           localStorage.setItem(cacheKey, JSON.stringify(perceivedValues));
         }
       }
@@ -437,80 +459,90 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         </Alert>
       )}
 
-      <div>
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Brain className="h-5 w-5 text-primary" />
-                Analysis Setup
-              </CardTitle>
-              {onEditAnalysisParameters && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-xs"
-                  onClick={onEditAnalysisParameters}
-                >
-                  <SlidersHorizontal className="h-4 w-4 mr-1" />
-                  Edit analysis parameters
-                </Button>
+      <Card className="w-full">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Brain className="h-5 w-5 text-primary" />
+              Analysis Setup
+            </CardTitle>
+            {onEditAnalysisParameters && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs"
+                onClick={onEditAnalysisParameters}
+              >
+                <SlidersHorizontal className="h-4 w-4 mr-1" />
+                Edit analysis parameters
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <div className="grid w-full gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            <div className="rounded-lg border bg-card/70 p-3 shadow-sm transition-colors hover:bg-muted/30">
+              <p className="mb-1 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <Users className="h-3.5 w-3.5" />
+                Personas
+              </p>
+              <p className="text-sm font-semibold">{selectedPersonas.length} selected</p>
+              <p className="truncate text-xs text-muted-foreground">
+                {selectedPersonas.map(getPersonaName).slice(0, 2).join(", ")}
+                {selectedPersonas.length > 2 ? ` +${selectedPersonas.length - 2}` : ""}
+              </p>
+            </div>
+
+            <div className="rounded-lg border bg-card/70 p-3 shadow-sm transition-colors hover:bg-muted/30">
+              <p className="mb-1 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <Car className="h-3.5 w-3.5" />
+                Vehicle
+              </p>
+              <p className="truncate text-sm font-semibold">{vehiclesById[selectedVehicle]?.name ?? selectedVehicle}</p>
+            </div>
+
+            <div className="rounded-lg border bg-card/70 p-3 shadow-sm transition-colors hover:bg-muted/30">
+              <p className="mb-1 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <ListChecks className="h-3.5 w-3.5" />
+                Features
+              </p>
+              <p className="text-sm font-semibold">{features.length} loaded</p>
+            </div>
+
+            <div className="rounded-lg border bg-card/70 p-3 shadow-sm transition-colors hover:bg-muted/30">
+              <p className="mb-1 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <Cpu className="h-3.5 w-3.5" />
+                Model
+              </p>
+              <p className="truncate text-sm font-semibold">{selectedModel}</p>
+              <p className="text-xs text-muted-foreground">{serviceTier === 'flex' ? 'Flex tier' : 'Standard tier'}</p>
+            </div>
+
+            <div className="rounded-lg border bg-card/70 p-3 shadow-sm transition-colors hover:bg-muted/30">
+              <p className="mb-1 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <Ticket className="h-3.5 w-3.5" />
+                Vouchers
+              </p>
+              <p className="text-sm font-semibold">{voucherPolicyBounds.levels} levels</p>
+              <p className="text-xs text-muted-foreground">Low ${voucherPolicyBounds.min_discount} · High ${voucherPolicyBounds.max_discount}</p>
+            </div>
+
+            <div className="rounded-lg border bg-card/70 p-3 shadow-sm transition-colors hover:bg-muted/30">
+              <p className="mb-1 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <ReceiptText className="h-3.5 w-3.5" />
+                Cost
+              </p>
+              <p className="text-sm font-semibold">{costEstimate ? (useCache ? '$0.00' : formatPrice(costEstimate.totalCost)) : '—'}</p>
+              {costEstimate && !useCache && (
+                <p className="text-xs text-muted-foreground">~{costEstimate.totalCalls} calls</p>
+              )}
+              {useCache && (
+                <p className="text-xs text-muted-foreground">Cache enabled</p>
               )}
             </div>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div>
-              <span className="text-sm font-medium">Personas:</span>
-              <div className="mt-1">
-                {selectedPersonas.map(persona => (
-                  <Badge key={persona} variant="outline" className="mr-1 mb-1">
-                    {getPersonaName(persona)}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-            <div>
-              <span className="text-sm font-medium">Vehicle:</span>
-              <Badge variant="outline" className="ml-2">
-                {vehiclesById[selectedVehicle]?.name ?? selectedVehicle}
-              </Badge>
-            </div>
-            <div>
-              <span className="text-sm font-medium">Features:</span>
-              <Badge variant="outline" className="ml-2">
-                {features.length} loaded
-              </Badge>
-            </div>
-            <div>
-              <span className="text-sm font-medium">Model:</span>
-              <Badge variant="outline" className="ml-2">
-                {selectedModel}
-              </Badge>
-              <Badge variant="outline" className="ml-2">
-                {serviceTier === 'flex' ? 'Flex' : 'Standard'}
-              </Badge>
-            </div>
-            {costEstimate && (
-              <div className="text-sm">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">Estimated cost:</span>
-                  <span className="font-semibold">
-                    {useCache ? '$0.00' : formatPrice(costEstimate.totalCost)}
-                  </span>
-                </div>
-                {!useCache && (
-                  <p className="text-xs text-muted-foreground">
-                    ~{costEstimate.totalCalls} calls · {Math.round(costEstimate.inputTokens)} input tokens · {Math.round(costEstimate.outputTokens)} output tokens
-                  </p>
-                )}
-                {useCache && (
-                  <p className="text-xs text-muted-foreground">Cache enabled: no new API calls expected.</p>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="flex items-center space-x-2 justify-center">
         <input
@@ -555,7 +587,9 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
               Analysis in Progress
             </CardTitle>
             <CardDescription>
-              AI persona is evaluating feature sets...
+              {analysisSettings.showProgressUpdates
+                ? 'AI persona is evaluating feature sets...'
+                : 'Analysis is running with compact progress updates.'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -567,21 +601,25 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
               <Progress value={progress} className="h-2" />
             </div>
 
-            {currentPersona && (
+            {analysisSettings.showProgressUpdates && currentPersona && (
               <div className="text-center">
                 <p className="text-sm font-medium mb-1">Analyzing: <strong>{currentPersona}</strong></p>
               </div>
             )}
 
             <div className="text-center">
-              <p className="text-sm font-medium mb-1">Current Set: {currentSet}</p>
+              {analysisSettings.showProgressUpdates && (
+                <p className="text-sm font-medium mb-1">Current Set: {currentSet}</p>
+              )}
               <p className="text-sm text-muted-foreground">{analysisStatus}</p>
             </div>
 
-            <div className="text-center text-xs text-muted-foreground">
-              ⏱ Elapsed: <strong>{Math.floor(elapsedTime / 60)}m {elapsedTime % 60}s</strong> ·
-              ETA: <strong>{Math.floor(eta / 60)}m {eta % 60}s</strong>
-            </div>
+            {analysisSettings.showProgressUpdates && (
+              <div className="text-center text-xs text-muted-foreground">
+                ⏱ Elapsed: <strong>{Math.floor(elapsedTime / 60)}m {elapsedTime % 60}s</strong> ·
+                ETA: <strong>{Math.floor(eta / 60)}m {eta % 60}s</strong>
+              </div>
+            )}
 
             {progress === 100 && (
               <div className="text-center pt-2">

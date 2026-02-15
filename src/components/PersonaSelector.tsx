@@ -8,6 +8,7 @@ import { PersonaDetailsDialog } from "@/components/PersonaDetailsDialog";
 import { PersonaUpsertDialog } from "@/components/PersonaUpsertDialog";
 import type { CustomerPersona } from "@/personas/types";
 import { useWorkspaceStore } from "@/store/workspaceStore";
+import { Link } from "react-router-dom";
 
 function personaIcon(id: string) {
   if (id === "fleet-manager") return Briefcase;
@@ -58,10 +59,15 @@ export const PersonaSelector = ({ selectedPersonas, onPersonaSelect }: PersonaSe
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <h2 className="text-2xl font-bold text-foreground mb-2">Select Target Personas</h2>
+        <h2 className="text-2xl font-bold text-foreground mb-2">Select Target Persona</h2>
         <p className="text-muted-foreground">
           Choose one or more customer personas. Multiple personas enable comparison analysis.
         </p>
+      </div>
+      <div className="flex justify-end">
+        <Button asChild variant="outline" size="sm">
+          <Link to="/persona-library">Open Persona Library</Link>
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

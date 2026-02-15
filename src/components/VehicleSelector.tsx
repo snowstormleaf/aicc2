@@ -8,6 +8,7 @@ import { VehicleDetailsDialog } from "@/components/VehicleDetailsDialog";
 import { VehicleUpsertDialog } from "@/components/VehicleUpsertDialog";
 import type { Vehicle } from "@/types/vehicle";
 import { useWorkspaceStore } from "@/store/workspaceStore";
+import { Link } from "react-router-dom";
 
 interface VehicleSelectorProps {
   selectedVehicle: string | null;
@@ -43,14 +44,21 @@ export const VehicleSelector = ({ selectedVehicle, onSelectVehicle }: VehicleSel
   if (vehicles.length === 0) {
     return (
       <div className="space-y-6">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-foreground mb-2">Select Target Vehicle</h2>
-          <p className="text-muted-foreground">Choose a vehicle model for feature analysis</p>
+        <div className="space-y-3">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold text-foreground mb-2">Select Target Vehicle</h2>
+            <p className="text-muted-foreground">Choose a vehicle model for feature analysis</p>
+          </div>
+          <div className="flex justify-end">
+            <Button asChild variant="outline" size="sm">
+              <Link to="/vehicle-library">Open Vehicle Library</Link>
+            </Button>
+          </div>
         </div>
         <div className="text-center p-12 border-2 border-dashed rounded-lg">
           <p className="text-muted-foreground mb-4">No vehicles created yet.</p>
           <p className="text-sm text-muted-foreground">
-            Create vehicles in the Workspace menu (Vehicles tab) to get started.
+            Open Vehicle Library from the analysis workflow to create vehicles.
           </p>
         </div>
       </div>
@@ -59,9 +67,16 @@ export const VehicleSelector = ({ selectedVehicle, onSelectVehicle }: VehicleSel
 
   return (
     <div className="space-y-6">
-      <div className="text-center">
-        <h2 className="text-2xl font-bold text-foreground mb-2">Select Target Vehicle</h2>
-        <p className="text-muted-foreground">Choose the vehicle model for feature analysis</p>
+      <div className="space-y-3">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-foreground mb-2">Select Target Vehicle</h2>
+          <p className="text-muted-foreground">Choose the vehicle model for feature analysis</p>
+        </div>
+        <div className="flex justify-end">
+          <Button asChild variant="outline" size="sm">
+            <Link to="/vehicle-library">Open Vehicle Library</Link>
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

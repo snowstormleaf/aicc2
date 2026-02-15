@@ -1,12 +1,10 @@
 import { useMemo, useState } from "react";
-import { Menu, Settings, Users, Car, SlidersHorizontal, Filter } from "lucide-react";
+import { Menu, Settings, SlidersHorizontal, Filter } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import { ConfigPage } from "./ConfigPage";
-import { PersonaLibrary } from "./PersonaLibrary";
-import { VehicleLibrary } from "@/components/vehicles/VehicleLibrary";
 import { DesignParametersPanel } from "./DesignParametersPanel";
 import { usePersonas } from "@/personas/store";
 import { useWorkspaceStore } from "@/store/workspaceStore";
@@ -60,7 +58,7 @@ export const BurgerMenu = ({ open, onOpenChange, activeTab, onTabChange, feature
         </Button>
       </SheetTrigger>
 
-      <SheetContent side="right" className="w-[520px] sm:max-w-none">
+      <SheetContent side="right" className="w-full sm:max-w-[520px]">
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
             <Settings className="h-5 w-5" />
@@ -70,31 +68,23 @@ export const BurgerMenu = ({ open, onOpenChange, activeTab, onTabChange, feature
 
         <div className="mt-4">
           <Tabs value={currentTab} onValueChange={setCurrentTab}>
-            <TabsList className="w-full justify-start">
+            <TabsList className="grid h-auto w-full grid-cols-3">
               <TabsTrigger value="config" className="gap-2">
                 <Settings className="h-4 w-4" />
                 Configuration
               </TabsTrigger>
               <TabsTrigger value="design" className="gap-2">
                 <SlidersHorizontal className="h-4 w-4" />
-                Design Parameters
+                Analysis parameters
               </TabsTrigger>
               <TabsTrigger value="filters" className="gap-2">
                 <Filter className="h-4 w-4" />
                 Filters
               </TabsTrigger>
-              <TabsTrigger value="personas" className="gap-2">
-                <Users className="h-4 w-4" />
-                Personas
-              </TabsTrigger>
-              <TabsTrigger value="vehicles" className="gap-2">
-                <Car className="h-4 w-4" />
-                Vehicles
-              </TabsTrigger>
             </TabsList>
 
             <TabsContent value="config" className="mt-4">
-              <ConfigPage onClose={() => setIsOpen(false)} />
+              <ConfigPage onClose={() => setMenuOpen(false)} />
             </TabsContent>
 
             <TabsContent value="design" className="mt-4">
@@ -138,14 +128,6 @@ export const BurgerMenu = ({ open, onOpenChange, activeTab, onTabChange, feature
                   </p>
                 </div>
               </div>
-            </TabsContent>
-
-            <TabsContent value="personas" className="mt-4">
-              <PersonaLibrary />
-            </TabsContent>
-
-            <TabsContent value="vehicles" className="mt-4">
-              <VehicleLibrary />
             </TabsContent>
           </Tabs>
         </div>

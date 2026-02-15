@@ -40,20 +40,52 @@ export interface PerceivedValue {
 
 export class MaxDiffEngine {
   /**
-   * Generate voucher placeholders using incoming feature costs and bounds
-   * Returns a small set of vouchers used as a monetary scale for perceived value
+   * Voucher policy:
+   * - min = 1
+   * - max = 1.2 * max(feature cost)
+   * - levels = floor(feature_count / 3.5), minimum 2
    */
-  static generateVouchers(featureCosts: number[], bounds: { min_discount: number; max_discount: number; levels: number }): Voucher[] {
-    const avg = (bounds.min_discount + bounds.max_discount) / 2;
-    // Create one voucher per level representing increasing discounts
+  static deriveVoucherBounds(featureCosts: number[]): { min_discount: number; max_discount: number; levels: number } {
+    const finiteCosts = featureCosts.filter((value) => Number.isFinite(value) && value > 0);
+    const highestCost = finiteCosts.length > 0 ? Math.max(...finiteCosts) : 1;
+    const minDiscount = 1;
+    const maxDiscount = Number(Math.max(minDiscount, highestCost * 1.2).toFixed(2));
+    const levels = Math.max(2, Math.floor(featureCosts.length / 3.5));
+
+    return {
+      min_discount: minDiscount,
+      max_discount: maxDiscount,
+      levels,
+    };
+  }
+
+  private static formatVoucherAmount(amount: number): string {
+    if (Number.isInteger(amount)) return String(amount);
+    return amount.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+  }
+
+  /**
+   * Generate vouchers using geometric spacing across policy bounds.
+   */
+  static generateVouchers(featureCosts: number[], _bounds?: { min_discount: number; max_discount: number; levels: number }): Voucher[] {
+    const bounds = this.deriveVoucherBounds(featureCosts);
+    const levels = Math.max(2, bounds.levels);
     const vouchers: Voucher[] = [];
-    const step = (bounds.max_discount - bounds.min_discount) / Math.max(1, bounds.levels - 1);
-    for (let i = 0; i < bounds.levels; i++) {
-      const amount = Math.round(bounds.min_discount + step * i);
+    const ratio = Math.pow(bounds.max_discount / bounds.min_discount, 1 / (levels - 1));
+    let previous = 0;
+
+    for (let i = 0; i < levels; i++) {
+      let amount = bounds.min_discount * Math.pow(ratio, i);
+      if (i === 0) amount = bounds.min_discount;
+      if (i === levels - 1) amount = bounds.max_discount;
+      amount = Number(amount.toFixed(2));
+      amount = Math.max(previous, amount);
+      previous = amount;
+      const formatted = this.formatVoucherAmount(amount);
       vouchers.push({
         id: `voucher-${i + 1}`,
         amount,
-        description: `Voucher: $${amount} off (level ${i + 1})`
+        description: `Voucher: $${formatted} off (level ${i + 1})`
       });
     }
     return vouchers;

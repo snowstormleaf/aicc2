@@ -23,7 +23,7 @@ describe("analysis set planning", () => {
     const generatedSets = MaxDiffEngine.generateMaxDiffSets(features, vouchers, appearanceTarget);
 
     assert.equal(oldEstimate, 8);
-    assert.equal(generatedSets.length, 12);
+    assert.equal(generatedSets.length, 9);
     assert.notEqual(generatedSets.length, oldEstimate);
   });
 
@@ -38,6 +38,18 @@ describe("analysis set planning", () => {
     const personaCount = 3;
 
     const totalCalls = personaCount * generatedSets.length;
-    assert.equal(totalCalls, 33);
+    assert.equal(totalCalls, 24);
+  });
+
+  it("applies voucher policy bounds and geometric spacing", () => {
+    const features = makeFeatures(10);
+    const vouchers = MaxDiffEngine.generateVouchers(
+      features.map((feature) => feature.materialCost),
+      { min_discount: 10, max_discount: 200, levels: 6 }
+    );
+
+    assert.equal(vouchers.length, 2);
+    assert.equal(vouchers[0].amount, 1);
+    assert.equal(vouchers[vouchers.length - 1].amount, 130.8);
   });
 });

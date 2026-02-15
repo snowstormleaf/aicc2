@@ -1,8 +1,8 @@
-import { type ChangeEvent, type DragEvent, useEffect, useState } from 'react';
+import { type ChangeEvent, type DragEvent, useRef, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Upload, FileSpreadsheet, AlertCircle, Download, Trash2, Plus } from "lucide-react";
+import { Upload, FileSpreadsheet, AlertCircle, Download, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { parseXlsxRows } from "@/lib/xlsx-utils";
 
@@ -27,23 +27,37 @@ interface FeatureUploadProps {
 
 const EMPTY_ROW: EditableFeatureRow = { id: "", name: "", description: "", materialCost: "" };
 
+const toEditableRows = (items: Feature[]): EditableFeatureRow[] =>
+  items.map((feature) => ({
+    id: feature.id,
+    name: feature.name,
+    description: feature.description,
+    materialCost: String(feature.materialCost),
+  }));
+
+const withTrailingEmptyRow = (rows: EditableFeatureRow[]): EditableFeatureRow[] => {
+  if (rows.length === 0) {
+    return [{ ...EMPTY_ROW }];
+  }
+  const last = rows[rows.length - 1];
+  if (!last.name && !last.description && !last.materialCost) {
+    return rows;
+  }
+  return [...rows, { ...EMPTY_ROW }];
+};
+
+const serializeFeatures = (items: Feature[]) =>
+  JSON.stringify(items.map((item) => [item.name, item.description, item.materialCost]));
+
 export const FeatureUpload = ({ features, onFeaturesUploaded }: FeatureUploadProps) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [editorRows, setEditorRows] = useState<EditableFeatureRow[]>([]);
+  const [editorRows, setEditorRows] = useState<EditableFeatureRow[]>(() =>
+    withTrailingEmptyRow(toEditableRows(features))
+  );
+  const editorRowsRef = useRef<EditableFeatureRow[]>(withTrailingEmptyRow(toEditableRows(features)));
+  const lastPersistedFeaturesRef = useRef<string>(serializeFeatures(features));
   const { toast } = useToast();
-
-  useEffect(() => {
-    setEditorRows([
-      ...features.map((feature) => ({
-        id: feature.id,
-        name: feature.name,
-        description: feature.description,
-        materialCost: String(feature.materialCost),
-      })),
-      { ...EMPTY_ROW },
-    ]);
-  }, [features]);
 
   const normalizeFeatures = (items: Feature[]) => {
     const counts = new Map<string, number>();
@@ -173,6 +187,10 @@ export const FeatureUpload = ({ features, onFeaturesUploaded }: FeatureUploadPro
         ? parseCSV(await file.text())
         : await parseXlsx(await file.arrayBuffer());
 
+      const nextRows = withTrailingEmptyRow(toEditableRows(parsedFeatures));
+      setEditorRows(nextRows);
+      editorRowsRef.current = nextRows;
+      lastPersistedFeaturesRef.current = serializeFeatures(parsedFeatures);
       onFeaturesUploaded(parsedFeatures);
       toast({ title: "Features parsed", description: `${parsedFeatures.length} feature rows loaded.` });
     } catch (error) {
@@ -197,7 +215,12 @@ export const FeatureUpload = ({ features, onFeaturesUploaded }: FeatureUploadPro
       .filter((item) => item.name || item.description || !Number.isNaN(item.materialCost))
       .filter((item) => item.name && item.description && !Number.isNaN(item.materialCost));
 
-    onFeaturesUploaded(normalizeFeatures(parsed));
+    const normalized = normalizeFeatures(parsed);
+    const nextKey = serializeFeatures(normalized);
+    if (nextKey !== lastPersistedFeaturesRef.current) {
+      lastPersistedFeaturesRef.current = nextKey;
+      onFeaturesUploaded(normalized);
+    }
   };
 
   const handleDrop = (e: DragEvent) => {
@@ -213,20 +236,19 @@ export const FeatureUpload = ({ features, onFeaturesUploaded }: FeatureUploadPro
   };
 
   const updateRow = (index: number, key: keyof EditableFeatureRow, value: string) => {
-    const next = editorRows.map((row, idx) => idx === index ? { ...row, [key]: value } : row);
-    const last = next[next.length - 1];
-    if (last && (last.name || last.description || last.materialCost)) {
-      next.push({ ...EMPTY_ROW });
-    }
+    const current = editorRowsRef.current;
+    const next = withTrailingEmptyRow(
+      current.map((row, idx) => (idx === index ? { ...row, [key]: value } : row))
+    );
+    editorRowsRef.current = next;
     setEditorRows(next);
+    persistRows(next);
   };
 
   const removeRow = (index: number) => {
-    const next = editorRows.filter((_, idx) => idx !== index);
-    if (next.length === 0 || (next[next.length - 1].name || next[next.length - 1].description || next[next.length - 1].materialCost)) {
-      next.push({ ...EMPTY_ROW });
-    }
+    const next = withTrailingEmptyRow(editorRowsRef.current.filter((_, idx) => idx !== index));
     setEditorRows(next);
+    editorRowsRef.current = next;
     persistRows(next);
   };
 
@@ -309,15 +331,12 @@ export const FeatureUpload = ({ features, onFeaturesUploaded }: FeatureUploadPro
 
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Plus className="h-5 w-5 text-primary" />
-            Feature List Editor
-          </CardTitle>
+          <CardTitle className="flex items-center gap-2">Feature List Editor</CardTitle>
           <CardDescription>
-            Parsed and manual features live in one editable panel. Click into this panel to autosave current edits.
+            Parsed and manual features live in one editable panel. Changes are saved automatically as you type.
           </CardDescription>
         </CardHeader>
-        <CardContent onFocusCapture={() => persistRows(editorRows)}>
+        <CardContent>
           <div className="overflow-x-auto">
             <table className="w-full border-collapse border border-gray-300 text-sm">
               <thead>
@@ -338,7 +357,7 @@ export const FeatureUpload = ({ features, onFeaturesUploaded }: FeatureUploadPro
                           className="w-full bg-transparent text-sm"
                           value={feature.name}
                           onChange={(e) => updateRow(index, "name", e.target.value)}
-                          onBlur={() => persistRows(editorRows)}
+                          onBlur={() => persistRows(editorRowsRef.current)}
                           placeholder={isEmptyRow ? "Add another feature..." : "Feature name"}
                         />
                       </td>
@@ -347,7 +366,7 @@ export const FeatureUpload = ({ features, onFeaturesUploaded }: FeatureUploadPro
                           className="w-full bg-transparent text-sm"
                           value={feature.description}
                           onChange={(e) => updateRow(index, "description", e.target.value)}
-                          onBlur={() => persistRows(editorRows)}
+                          onBlur={() => persistRows(editorRowsRef.current)}
                           placeholder={isEmptyRow ? "Description" : "Feature description"}
                         />
                       </td>
@@ -358,7 +377,7 @@ export const FeatureUpload = ({ features, onFeaturesUploaded }: FeatureUploadPro
                           type="number"
                           min="0"
                           onChange={(e) => updateRow(index, "materialCost", e.target.value)}
-                          onBlur={() => persistRows(editorRows)}
+                          onBlur={() => persistRows(editorRowsRef.current)}
                           placeholder="0"
                         />
                       </td>

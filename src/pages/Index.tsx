@@ -1,7 +1,6 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { PersonaSelector } from "@/components/PersonaSelector";
 import { VehicleSelector } from "@/components/VehicleSelector";
@@ -29,15 +28,73 @@ interface Feature {
 
 type Step = 'persona' | 'vehicle' | 'upload' | 'analysis' | 'results';
 
+const WORKFLOW_SESSION_STORAGE_KEY = 'analysis_workflow_state';
+
+type PersistedWorkflowState = {
+  currentStep: Step;
+  selectedPersonas: string[];
+  selectedVehicle: string | null;
+  features: Feature[];
+  analysisResults: Array<[string, PerceivedValue[]]> | null;
+  callLogs: MaxDiffCallLog[];
+  workspaceTab: string;
+};
+
+const readPersistedWorkflowState = (): PersistedWorkflowState | null => {
+  try {
+    const raw = sessionStorage.getItem(WORKFLOW_SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PersistedWorkflowState>;
+    if (!parsed || typeof parsed !== 'object') return null;
+
+    const validSteps: Step[] = ['persona', 'vehicle', 'upload', 'analysis', 'results'];
+    const step = validSteps.includes(parsed.currentStep as Step) ? (parsed.currentStep as Step) : 'persona';
+    const validWorkspaceTabs = ['config', 'design', 'filters'];
+    const workspaceTab =
+      typeof parsed.workspaceTab === 'string' && validWorkspaceTabs.includes(parsed.workspaceTab)
+        ? parsed.workspaceTab
+        : 'config';
+
+    return {
+      currentStep: step,
+      selectedPersonas: Array.isArray(parsed.selectedPersonas) ? parsed.selectedPersonas : [],
+      selectedVehicle: typeof parsed.selectedVehicle === 'string' ? parsed.selectedVehicle : null,
+      features: Array.isArray(parsed.features) ? parsed.features : [],
+      analysisResults: Array.isArray(parsed.analysisResults) ? parsed.analysisResults : null,
+      callLogs: Array.isArray(parsed.callLogs) ? parsed.callLogs : [],
+      workspaceTab,
+    };
+  } catch {
+    return null;
+  }
+};
+
 const Index = () => {
-  const [currentStep, setCurrentStep] = useState<Step>('persona');
-  const [selectedPersonas, setSelectedPersonas] = useState<string[]>([]);
-  const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
-  const [features, setFeatures] = useState<Feature[]>([]);
-  const [analysisResults, setAnalysisResults] = useState<Map<string, PerceivedValue[]> | null>(null);
-  const [callLogs, setCallLogs] = useState<MaxDiffCallLog[]>([]);
+  const [persistedState] = useState<PersistedWorkflowState | null>(() => readPersistedWorkflowState());
+
+  const [currentStep, setCurrentStep] = useState<Step>(persistedState?.currentStep ?? 'persona');
+  const [selectedPersonas, setSelectedPersonas] = useState<string[]>(persistedState?.selectedPersonas ?? []);
+  const [selectedVehicle, setSelectedVehicle] = useState<string | null>(persistedState?.selectedVehicle ?? null);
+  const [features, setFeatures] = useState<Feature[]>(persistedState?.features ?? []);
+  const [analysisResults, setAnalysisResults] = useState<Map<string, PerceivedValue[]> | null>(
+    persistedState?.analysisResults ? new Map<string, PerceivedValue[]>(persistedState.analysisResults) : null
+  );
+  const [callLogs, setCallLogs] = useState<MaxDiffCallLog[]>(persistedState?.callLogs ?? []);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
-  const [workspaceTab, setWorkspaceTab] = useState("config");
+  const [workspaceTab, setWorkspaceTab] = useState(persistedState?.workspaceTab ?? "config");
+
+  useEffect(() => {
+    const serializable: PersistedWorkflowState = {
+      currentStep,
+      selectedPersonas,
+      selectedVehicle,
+      features,
+      analysisResults: analysisResults ? Array.from(analysisResults.entries()) : null,
+      callLogs,
+      workspaceTab,
+    };
+    sessionStorage.setItem(WORKFLOW_SESSION_STORAGE_KEY, JSON.stringify(serializable));
+  }, [analysisResults, callLogs, currentStep, features, selectedPersonas, selectedVehicle, workspaceTab]);
 
   const steps = [
     { id: 'persona', label: 'Select Persona', icon: Users, description: 'Choose target buyer persona' },
@@ -161,13 +218,10 @@ const Index = () => {
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-foreground">AI Customer Car Clinic</h1>
+              <h1 className="text-2xl font-bold text-foreground">AI Customer Clinic</h1>
               <p className="text-sm text-muted-foreground">MaxDiff Tradeoff Analysis Platform</p>
             </div>
             <div className="flex items-center gap-3">
-              <Badge variant="outline" className="text-xs">
-                Powered by AI Personas
-              </Badge>
               <BurgerMenu
                 open={workspaceOpen}
                 onOpenChange={setWorkspaceOpen}
@@ -260,7 +314,7 @@ const Index = () => {
       <footer className="border-t mt-16 py-8 bg-card/30">
         <div className="container mx-auto px-4 text-center">
           <p className="text-sm text-muted-foreground">
-            AI Customer Car Clinic - Advanced MaxDiff Analysis for Automotive Features
+            AI Customer Clinic - Advanced MaxDiff Analysis for Automotive Features
           </p>
         </div>
       </footer>
