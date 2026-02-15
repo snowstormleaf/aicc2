@@ -343,6 +343,7 @@ export class LLMClient {
       }
     }
 
+    let lastError: unknown = null;
     for (let attempt = 1; attempt <= this.config.maxRetries!; attempt++) {
       try {
         const response = await fetch('https://api.openai.com/v1/responses', {
@@ -387,6 +388,7 @@ export class LLMClient {
           ranking: parsed.ranking || []
         };
       } catch (error) {
+        lastError = error;
         console.warn(`Attempt ${attempt} failed:`, error);
 
         const message = String(error).toLowerCase();
@@ -403,29 +405,14 @@ export class LLMClient {
           tokenCap = Math.min(4096, Math.max(tokenCap * 2, tokenCap + 320));
         }
         
-        if (attempt === this.config.maxRetries) {
-          // Fallback to random selection
-          console.warn('All attempts failed, using random fallback');
-          return this.generateRandomResponse(set, persona);
-        }
+        if (attempt === this.config.maxRetries) break;
         
         // Linear backoff
         await new Promise(resolve => setTimeout(resolve, attempt * 1000));
       }
     }
 
-    // This should never be reached, but TypeScript requires it
-    return this.generateRandomResponse(set, persona);
-  }
-
-  private generateRandomResponse(set: MaxDiffSet, persona: PersonaProfile): RawResponse {
-    const shuffled = [...set.options].sort(() => Math.random() - 0.5);
-    return {
-      setId: set.id,
-      personaId: persona.id,
-      mostValued: shuffled[0].id,
-      leastValued: shuffled[shuffled.length - 1].id,
-      ranking: shuffled.map(o => o.id)
-    };
+    const reason = lastError instanceof Error ? lastError.message : String(lastError ?? 'Unknown error');
+    throw new Error(`Failed to rank options after ${this.config.maxRetries} attempts: ${reason}`);
   }
 }

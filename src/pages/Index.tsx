@@ -189,6 +189,7 @@ const Index = () => {
               onAnalysisComplete={(results, logs) => {
                 setAnalysisResults(results);
                 setCallLogs(logs);
+                setCurrentStep('results');
               }}
               onEditAnalysisParameters={() => {
                 setWorkspaceTab('design');

@@ -125,9 +125,14 @@ export function requestLogger(req, res, next) {
 
 // ===== HEALTH CHECK UTILITIES =====
 
-export function createHealthCheck(db) {
+export function createHealthCheck(dbOrGetter) {
   return async (req, res) => {
     try {
+      const db = typeof dbOrGetter === 'function' ? dbOrGetter() : dbOrGetter;
+      if (!db) {
+        throw new Error('Database not initialized');
+      }
+
       // Test database connection
       const result = await db.get('SELECT 1');
       

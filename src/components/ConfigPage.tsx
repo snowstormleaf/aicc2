@@ -1,28 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { ApiKeyInput } from './ApiKeyInput';
-import {
-  analysisRetryOptions,
-  analysisTemperatureOptions,
-  ANALYSIS_SETTINGS_UPDATED_EVENT,
-  getStoredAnalysisSettings,
-  saveAnalysisSettings,
-  type AnalysisSettings,
-} from '@/lib/analysis-settings';
+import { ANALYSIS_SETTINGS_UPDATED_EVENT } from '@/lib/analysis-settings';
 import { runSetupHealthChecks, type SetupHealthResult } from '@/lib/setup-health';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import {
-  Brain,
   Key,
   Loader2,
   RefreshCw,
-  Server,
 } from 'lucide-react';
 
 interface ConfigPageProps {
@@ -31,7 +19,6 @@ interface ConfigPageProps {
 
 export const ConfigPage = ({ onClose }: ConfigPageProps) => {
   const [hasApiKey, setHasApiKey] = useState(false);
-  const [analysisSettings, setAnalysisSettings] = useState<AnalysisSettings>(getStoredAnalysisSettings());
   const [healthResult, setHealthResult] = useState<SetupHealthResult | null>(null);
   const [isCheckingHealth, setIsCheckingHealth] = useState(false);
 
@@ -47,7 +34,6 @@ export const ConfigPage = ({ onClose }: ConfigPageProps) => {
 
   useEffect(() => {
     setHasApiKey(!!localStorage.getItem('openai_api_key')?.trim());
-    setAnalysisSettings(getStoredAnalysisSettings());
     refreshSetupStatus();
   }, [refreshSetupStatus]);
 
@@ -55,14 +41,12 @@ export const ConfigPage = ({ onClose }: ConfigPageProps) => {
     const handleStorage = (event: StorageEvent) => {
       if (!event.key || ['openai_api_key', 'openai_model', 'openai_service_tier', 'analysis_settings'].includes(event.key)) {
         setHasApiKey(!!localStorage.getItem('openai_api_key')?.trim());
-        setAnalysisSettings(getStoredAnalysisSettings());
         refreshSetupStatus();
       }
     };
 
     const handleModelUpdate = () => refreshSetupStatus();
     const handleAnalysisUpdate = () => {
-      setAnalysisSettings(getStoredAnalysisSettings());
       refreshSetupStatus();
     };
 
@@ -83,19 +67,6 @@ export const ConfigPage = ({ onClose }: ConfigPageProps) => {
     refreshSetupStatus();
   };
 
-  const updateAnalysisSettings = <K extends keyof AnalysisSettings>(key: K, value: AnalysisSettings[K]) => {
-    const next = saveAnalysisSettings({ [key]: value });
-    setAnalysisSettings(next);
-  };
-
-  const checksById = useMemo(
-    () =>
-      new Map(
-        (healthResult?.checks ?? []).map((check) => [check.id, check])
-      ),
-    [healthResult]
-  );
-
   const configSections = [
     {
       id: 'api',
@@ -104,131 +75,6 @@ export const ConfigPage = ({ onClose }: ConfigPageProps) => {
       icon: Key,
       status: hasApiKey ? 'configured' : 'required',
       component: <ApiKeyInput onApiKeySet={handleApiKeySet} hasApiKey={hasApiKey} />,
-    },
-    {
-      id: 'analysis',
-      title: 'Analysis Settings',
-      description: 'Configure retries, temperature, caching, and runtime behavior',
-      icon: Brain,
-      status: 'configured',
-      component: (
-        <div className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="analysis-retries">Retry attempts</Label>
-              <Select
-                value={String(analysisSettings.maxRetries)}
-                onValueChange={(value) => updateAnalysisSettings('maxRetries', Number(value))}
-              >
-                <SelectTrigger id="analysis-retries">
-                  <SelectValue placeholder="Select retries" />
-                </SelectTrigger>
-                <SelectContent>
-                  {analysisRetryOptions.map((value) => (
-                    <SelectItem key={value} value={String(value)}>
-                      {value} {value === 1 ? 'retry' : 'retries'}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">Used for each OpenAI ranking call.</p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="analysis-temperature">Temperature</Label>
-              <Select
-                value={String(analysisSettings.temperature)}
-                onValueChange={(value) => updateAnalysisSettings('temperature', Number(value))}
-              >
-                <SelectTrigger id="analysis-temperature">
-                  <SelectValue placeholder="Select temperature" />
-                </SelectTrigger>
-                <SelectContent>
-                  {analysisTemperatureOptions.map((item) => (
-                    <SelectItem key={item.value} value={String(item.value)}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                For GPT-5 models, unsupported values are automatically omitted by the client.
-              </p>
-            </div>
-          </div>
-
-          <div className="space-y-3 rounded-md border p-3">
-            <div className="rounded-md bg-muted/40 p-3">
-              <div>
-                <p className="text-sm font-medium">Voucher spacing policy</p>
-                <p className="text-xs text-muted-foreground">
-                  Vouchers use fixed policy bounds: min $1, max 1.2× highest feature cost, levels floor(features/3.5), geometric spacing.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium">Persist analysis results</p>
-                <p className="text-xs text-muted-foreground">Save per-persona results into browser cache after completion.</p>
-              </div>
-              <Switch
-                checked={analysisSettings.persistResults}
-                onCheckedChange={(checked) => updateAnalysisSettings('persistResults', checked)}
-              />
-            </div>
-
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium">Default to cached results</p>
-                <p className="text-xs text-muted-foreground">Pre-enable "Use cached results" each time analysis step opens.</p>
-              </div>
-              <Switch
-                checked={analysisSettings.defaultUseCache}
-                onCheckedChange={(checked) => updateAnalysisSettings('defaultUseCache', checked)}
-              />
-            </div>
-
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium">Detailed progress updates</p>
-                <p className="text-xs text-muted-foreground">Show live set-by-set status during analysis execution.</p>
-              </div>
-              <Switch
-                checked={analysisSettings.showProgressUpdates}
-                onCheckedChange={(checked) => updateAnalysisSettings('showProgressUpdates', checked)}
-              />
-            </div>
-          </div>
-        </div>
-      ),
-    },
-    {
-      id: 'services',
-      title: 'Backend & Data Services',
-      description: 'Verify backend health and persona/vehicle service availability',
-      icon: Server,
-      status:
-        checksById.get('backend-health')?.status === 'healthy' && checksById.get('data-services')?.status === 'healthy'
-          ? 'configured'
-          : 'required',
-      component: (
-        <div className="space-y-2">
-          <p className="text-sm text-muted-foreground">
-            Backend health and data endpoint checks are included in Setup Status above.
-          </p>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={refreshSetupStatus}
-            disabled={isCheckingHealth}
-          >
-            {isCheckingHealth ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-            Re-run service checks
-          </Button>
-        </div>
-      ),
     },
   ];
 

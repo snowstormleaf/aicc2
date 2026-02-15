@@ -58,7 +58,7 @@ export const BurgerMenu = ({ open, onOpenChange, activeTab, onTabChange, feature
         </Button>
       </SheetTrigger>
 
-      <SheetContent side="right" className="w-full sm:max-w-[520px]">
+      <SheetContent side="right" className="flex h-full w-full flex-col overflow-hidden sm:max-w-[520px]">
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
             <Settings className="h-5 w-5" />
@@ -66,7 +66,7 @@ export const BurgerMenu = ({ open, onOpenChange, activeTab, onTabChange, feature
           </SheetTitle>
         </SheetHeader>
 
-        <div className="mt-4">
+        <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
           <Tabs value={currentTab} onValueChange={setCurrentTab}>
             <TabsList className="grid h-auto w-full grid-cols-3">
               <TabsTrigger value="config" className="gap-2">

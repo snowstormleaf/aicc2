@@ -81,15 +81,6 @@ const buildAnalysisPlan = (
   };
 };
 
-const buildFallbackRanking = (optionIds: string[]) => {
-  const ranking = [...optionIds].sort(() => Math.random() - 0.5);
-  return {
-    ranking,
-    mostValued: ranking[0],
-    leastValued: ranking[ranking.length - 1],
-  };
-};
-
 export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, onAnalysisComplete, onEditAnalysisParameters }: MaxDiffAnalysisProps) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -258,6 +249,10 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
 
     const startTime = Date.now();
     let callsDone = 0;
+    let activeCallStartedAt: number | null = null;
+    let totalCompletedCallSeconds = 0;
+    let smoothedEta = 0;
+    let timingIntervalId: number | null = null;
 
     try {
       const vehicle = vehiclesById[selectedVehicle];
@@ -332,13 +327,25 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
       }
 
       const updateTiming = () => {
-        const elapsed = (Date.now() - startTime) / 1000;
-        const avgPerCall = callsDone > 0 ? elapsed / callsDone : 0;
-        const remaining = Math.max(0, totalCalls - callsDone);
-        setElapsedTime(Math.floor(elapsed));
-        setEta(Math.floor(avgPerCall * remaining));
-        setProgress((callsDone / totalCalls) * 100);
+        const now = Date.now();
+        const elapsedSeconds = (now - startTime) / 1000;
+        const avgPerCall = callsDone > 0 ? totalCompletedCallSeconds / callsDone : 2.5;
+        const inFlightSeconds = activeCallStartedAt ? (now - activeCallStartedAt) / 1000 : 0;
+        const inFlightProgress = activeCallStartedAt
+          ? Math.min(0.95, inFlightSeconds / Math.max(avgPerCall, 0.25))
+          : 0;
+        const completedEquivalent = callsDone + inFlightProgress;
+        const remainingCalls = Math.max(0, totalCalls - completedEquivalent);
+        const currentEta = Math.round(remainingCalls * avgPerCall);
+        smoothedEta = smoothedEta === 0 ? currentEta : Math.round(smoothedEta * 0.75 + currentEta * 0.25);
+
+        setElapsedTime(Math.max(0, Math.round(elapsedSeconds)));
+        setEta(Math.max(0, smoothedEta));
+        setProgress(Math.min(100, (completedEquivalent / totalCalls) * 100));
       };
+
+      updateTiming();
+      timingIntervalId = window.setInterval(updateTiming, 250);
 
       const vehicleForAnalysis = {
         brand: vehicle.manufacturer || vehicle.name,
@@ -365,48 +372,35 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
             setAnalysisStatus(`${personaId}: Analyzing set ${index + 1}/${analysisPlan.maxDiffSets.length}`);
           }
 
+          const timestamp = new Date().toISOString();
+          const displayedFeatures = maxDiffSet.options.map((option) => option.name);
+          const optionNameById = new Map(maxDiffSet.options.map((option) => [option.id, option.name]));
+
+          activeCallStartedAt = Date.now();
+          updateTiming();
+
+          let response: RawResponse;
           try {
-            const timestamp = new Date().toISOString();
-            const displayedFeatures = maxDiffSet.options.map((option) => option.name);
-            const optionNameById = new Map(maxDiffSet.options.map((option) => [option.id, option.name]));
-
-            const response = await llmClient.rankOptions(
-              maxDiffSet,
-              persona,
-              vehicleForAnalysis,
-              analysisPlan.featureDescMap
-            );
-
-            responses.push(response);
-            callLogs.push({
-              timestamp,
-              displayedFeatures,
-              mostValued: optionNameById.get(response.mostValued) ?? response.mostValued,
-              leastValued: optionNameById.get(response.leastValued) ?? response.leastValued,
-            });
+            response = await llmClient.rankOptions(maxDiffSet, persona, vehicleForAnalysis, analysisPlan.featureDescMap);
           } catch (error) {
-            console.error(`Error processing set ${index + 1}:`, error);
-            const optionIds = maxDiffSet.options.map((option) => option.id);
-            const fallback = buildFallbackRanking(optionIds);
-            const timestamp = new Date().toISOString();
-            const optionNameById = new Map(maxDiffSet.options.map((option) => [option.id, option.name]));
-
-            responses.push({
-              setId: maxDiffSet.id,
-              personaId: persona.id,
-              mostValued: fallback.mostValued,
-              leastValued: fallback.leastValued,
-              ranking: fallback.ranking,
-            });
-
-            callLogs.push({
-              timestamp,
-              displayedFeatures: maxDiffSet.options.map((option) => option.name),
-              mostValued: optionNameById.get(fallback.mostValued) ?? fallback.mostValued,
-              leastValued: optionNameById.get(fallback.leastValued) ?? fallback.leastValued,
-            });
+            const reason = error instanceof Error ? error.message : String(error);
+            throw new Error(
+              `Failed on persona "${getPersonaName(personaId)}" set ${index + 1}/${analysisPlan.maxDiffSets.length}: ${reason}`
+            );
           }
 
+          responses.push(response);
+          callLogs.push({
+            timestamp,
+            displayedFeatures,
+            mostValued: optionNameById.get(response.mostValued) ?? response.mostValued,
+            leastValued: optionNameById.get(response.leastValued) ?? response.leastValued,
+          });
+
+          if (activeCallStartedAt) {
+            totalCompletedCallSeconds += Math.max(0.1, (Date.now() - activeCallStartedAt) / 1000);
+            activeCallStartedAt = null;
+          }
           callsDone++;
           updateTiming();
 
@@ -433,8 +427,17 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
       setProgress(100);
     } catch (error) {
       console.error('Analysis failed:', error);
-      setAnalysisStatus(`Analysis failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setAnalysisStatus(`Analysis failed: ${message}`);
+      toast({
+        title: "Analysis failed",
+        description: message,
+        variant: "destructive",
+      });
     } finally {
+      if (timingIntervalId !== null) {
+        window.clearInterval(timingIntervalId);
+      }
       setIsAnalyzing(false);
       setCurrentPersona('');
       setElapsedTime(0);

@@ -375,7 +375,7 @@ app.post('/api/sync/vehicles', async (req, res) => {
 
 // ===== HEALTH CHECK ENDPOINT =====
 
-app.get('/api/health', createHealthCheck(db));
+app.get('/api/health', createHealthCheck(() => db));
 
 // ===== ERROR HANDLING =====
 
@@ -383,26 +383,69 @@ app.use(errorHandler);
 
 // ===== INITIALIZE AND START SERVER =====
 
-const PORT = process.env.PORT || 3001;
+const PORT = Number(process.env.PORT) || 3001;
+
+function logServerReady(port) {
+  logger.info('🚀 AICC Backend server running', { port, url: `http://localhost:${port}` });
+  logger.info('📡 API endpoints:', {
+    personas_list: `GET http://localhost:${port}/api/personas`,
+    personas_create: `POST http://localhost:${port}/api/personas`,
+    personas_delete: `DELETE http://localhost:${port}/api/personas/:id`,
+    vehicles_list: `GET http://localhost:${port}/api/vehicles`,
+    vehicles_create: `POST http://localhost:${port}/api/vehicles`,
+    vehicles_delete: `DELETE http://localhost:${port}/api/vehicles/:id`,
+    health: `GET http://localhost:${port}/api/health`,
+  });
+}
+
+function startHttpServer(port) {
+  return new Promise((resolve, reject) => {
+    const server = app.listen(port, () => resolve(server));
+    server.on('error', reject);
+  });
+}
+
+async function isBackendHealthy(port) {
+  try {
+    const response = await fetch(`http://localhost:${port}/api/health`, {
+      signal: AbortSignal.timeout(1500)
+    });
+
+    if (!response.ok) return false;
+
+    const payload = await response.json().catch(() => null);
+    return Boolean(payload?.success || payload?.status === 'healthy');
+  } catch {
+    return false;
+  }
+}
 
 async function start() {
   try {
     await initDb();
     logger.info('✅ Database initialized', { path: dbPath });
-    
-    app.listen(PORT, () => {
-      logger.info('🚀 AICC Backend server running', { port: PORT, url: `http://localhost:${PORT}` });
-      logger.info('📡 API endpoints:', {
-        personas_list: `GET http://localhost:${PORT}/api/personas`,
-        personas_create: `POST http://localhost:${PORT}/api/personas`,
-        personas_delete: `DELETE http://localhost:${PORT}/api/personas/:id`,
-        vehicles_list: `GET http://localhost:${PORT}/api/vehicles`,
-        vehicles_create: `POST http://localhost:${PORT}/api/vehicles`,
-        vehicles_delete: `DELETE http://localhost:${PORT}/api/vehicles/:id`,
-        health: `GET http://localhost:${PORT}/api/health`,
-      });
-    });
+
+    await startHttpServer(PORT);
+    logServerReady(PORT);
   } catch (err) {
+    if (err?.code === 'EADDRINUSE') {
+      const healthyInstanceExists = await isBackendHealthy(PORT);
+
+      if (healthyInstanceExists) {
+        logger.warn('Backend already running, not starting a duplicate instance', {
+          port: PORT,
+          health: `http://localhost:${PORT}/api/health`
+        });
+        process.exit(0);
+      }
+
+      logger.error('Port is already in use by another process', {
+        port: PORT,
+        suggestion: `Free port ${PORT} or set PORT to another value`
+      });
+      process.exit(1);
+    }
+
     logger.error('❌ Failed to start server', { error: err.message });
     process.exit(1);
   }
