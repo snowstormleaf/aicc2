@@ -1,17 +1,24 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { PersonaSelector } from "@/components/PersonaSelector";
 import { VehicleSelector } from "@/components/VehicleSelector";
-import { FeatureUpload } from "@/components/FeatureUpload";
-import { MaxDiffAnalysis } from "@/components/MaxDiffAnalysis";
-import { ResultsVisualization } from "@/components/ResultsVisualization";
 import { PerceivedValue } from "@/lib/maxdiff-engine";
 import { BurgerMenu } from "@/components/BurgerMenu";
 import { Car, Users, Upload, BarChart3, CheckCircle, ArrowRight } from "lucide-react";
 import type { MaxDiffCallLog } from "@/types/analysis";
+
+const FeatureUpload = lazy(() =>
+  import("@/components/FeatureUpload").then((module) => ({ default: module.FeatureUpload }))
+);
+const MaxDiffAnalysis = lazy(() =>
+  import("@/components/MaxDiffAnalysis").then((module) => ({ default: module.MaxDiffAnalysis }))
+);
+const ResultsVisualization = lazy(() =>
+  import("@/components/ResultsVisualization").then((module) => ({ default: module.ResultsVisualization }))
+);
 
 interface Feature {
   id: string;
@@ -76,6 +83,12 @@ const Index = () => {
     }
   };
 
+  const lazyFallback = (
+    <Card className="p-6">
+      <p className="text-center text-muted-foreground">Loading step…</p>
+    </Card>
+  );
+
   const renderCurrentStep = () => {
     switch (currentStep) {
       case 'persona':
@@ -98,37 +111,43 @@ const Index = () => {
         );
       case 'upload':
         return (
-          <FeatureUpload
-            features={features}
-            onFeaturesUploaded={(newFeatures) => {
-              setFeatures(newFeatures);
-              setAnalysisResults(null);
-              setCallLogs([]);
-            }}
-          />
+          <Suspense fallback={lazyFallback}>
+            <FeatureUpload
+              features={features}
+              onFeaturesUploaded={(newFeatures) => {
+                setFeatures(newFeatures);
+                setAnalysisResults(null);
+                setCallLogs([]);
+              }}
+            />
+          </Suspense>
         );
       case 'analysis':
         return (
-          <MaxDiffAnalysis
-            features={features}
-            selectedPersonas={selectedPersonas}
-            selectedVehicle={selectedVehicle!}
-            onAnalysisComplete={(results, logs) => {
-              setAnalysisResults(results);
-              setCallLogs(logs);
-            }}
-            onEditAnalysisParameters={() => {
-              setWorkspaceTab('design');
-              setWorkspaceOpen(true);
-            }}
-          />
+          <Suspense fallback={lazyFallback}>
+            <MaxDiffAnalysis
+              features={features}
+              selectedPersonas={selectedPersonas}
+              selectedVehicle={selectedVehicle!}
+              onAnalysisComplete={(results, logs) => {
+                setAnalysisResults(results);
+                setCallLogs(logs);
+              }}
+              onEditAnalysisParameters={() => {
+                setWorkspaceTab('design');
+                setWorkspaceOpen(true);
+              }}
+            />
+          </Suspense>
         );
       case 'results':
         return analysisResults ? (
-          <ResultsVisualization
-            results={analysisResults}
-            callLogs={callLogs}
-          />
+          <Suspense fallback={lazyFallback}>
+            <ResultsVisualization
+              results={analysisResults}
+              callLogs={callLogs}
+            />
+          </Suspense>
         ) : null;
       default:
         return null;

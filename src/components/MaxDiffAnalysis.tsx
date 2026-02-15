@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Brain, CheckCircle, AlertCircle, SlidersHorizontal } from "lucide-react";
-import { MaxDiffEngine, PerceivedValue } from "@/lib/maxdiff-engine";
+import { MaxDiffEngine, PerceivedValue, RawResponse } from "@/lib/maxdiff-engine";
 import { buildSystemPrompt, buildUserPrompt, buildVoucherPrompt, LLMClient } from "@/lib/llm-client";
 import { usePersonas } from "@/personas/store";
 import { useVehicles } from "@/vehicles/store";
@@ -12,7 +12,7 @@ import { ApiKeyInput } from "./ApiKeyInput";
 import { DEFAULT_MODEL, DEFAULT_SERVICE_TIER, formatPrice, getStoredModelConfig, MODEL_PRICING } from "@/lib/model-pricing";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
-import { calculateOptimalSets } from "@/lib/design-parameters";
+import { buildAnalysisCacheKey } from "@/lib/analysis-cache";
 import type { MaxDiffCallLog } from "@/types/analysis";
 
 interface Feature {
@@ -29,6 +29,68 @@ interface MaxDiffAnalysisProps {
   onAnalysisComplete: (results: Map<string, PerceivedValue[]>, callLogs: MaxDiffCallLog[]) => void;
   onEditAnalysisParameters?: () => void;
 }
+
+const DEFAULT_VOUCHER_BOUNDS = {
+  min_discount: 10,
+  max_discount: 200,
+  levels: 6,
+};
+
+const estimateTokens = (text: string) => Math.ceil(text.length / 4);
+
+const buildEngineFeatures = (items: Feature[]) => {
+  const seenIds = new Set<string>();
+  return items.map((feature, index) => {
+    let baseId = (feature.id || feature.name.toLowerCase().replace(/\s+/g, '-'));
+    baseId = baseId.replace(/[^a-z0-9-]/g, '').toLowerCase() || `feature-${index}`;
+    let id = baseId;
+    let suffix = 1;
+    while (seenIds.has(id)) {
+      id = `${baseId}-${suffix++}`;
+    }
+    seenIds.add(id);
+
+    return {
+      id,
+      name: feature.name,
+      description: feature.description,
+      materialCost: feature.materialCost,
+    };
+  });
+};
+
+const buildAnalysisPlan = (
+  engineFeatures: ReturnType<typeof buildEngineFeatures>,
+  voucherBounds: { min_discount: number; max_discount: number; levels: number }
+) => {
+  const featureCosts = engineFeatures.map((feature) => feature.materialCost);
+  const vouchers = MaxDiffEngine.generateVouchers(featureCosts, voucherBounds);
+  const r = Math.max(3, Math.min(5, Math.ceil(engineFeatures.length / 5)));
+  const maxDiffSets = MaxDiffEngine.generateMaxDiffSets(engineFeatures, vouchers, r);
+
+  const featureDescMap = new Map<string, string>();
+  engineFeatures.forEach((feature) => {
+    featureDescMap.set(feature.id, feature.description);
+  });
+  vouchers.forEach((voucher) => {
+    featureDescMap.set(voucher.id, voucher.description);
+  });
+
+  return {
+    vouchers,
+    maxDiffSets,
+    featureDescMap,
+  };
+};
+
+const buildFallbackRanking = (optionIds: string[]) => {
+  const ranking = [...optionIds].sort(() => Math.random() - 0.5);
+  return {
+    ranking,
+    mostValued: ranking[0],
+    leastValued: ranking[ranking.length - 1],
+  };
+};
 
 export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, onAnalysisComplete, onEditAnalysisParameters }: MaxDiffAnalysisProps) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -47,6 +109,13 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
 
   const { personasById, getPersonaName } = usePersonas();
   const { vehiclesById } = useVehicles();
+
+  const engineFeatures = useMemo(() => buildEngineFeatures(features), [features]);
+  const estimatedPlan = useMemo(
+    () => buildAnalysisPlan(engineFeatures, DEFAULT_VOUCHER_BOUNDS),
+    [engineFeatures]
+  );
+  const totalSets = estimatedPlan.maxDiffSets.length;
 
   useEffect(() => {
     const storedKey = localStorage.getItem('openai_api_key');
@@ -77,31 +146,6 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
     setHasApiKey(!!key);
   };
 
-  const designParams = calculateOptimalSets(features.length);
-  const totalSets = designParams.sets;
-
-  const estimateTokens = (text: string) => Math.ceil(text.length / 4);
-
-  const buildEngineFeatures = (items: Feature[]) => {
-    const seenIds = new Set<string>();
-    return items.map((f, idx) => {
-      let baseId = (f.id || f.name.toLowerCase().replace(/\s+/g, '-'));
-      baseId = baseId.replace(/[^a-z0-9-]/g, '').toLowerCase() || `feature-${idx}`;
-      let id = baseId;
-      let i = 1;
-      while (seenIds.has(id)) {
-        id = `${baseId}-${i++}`;
-      }
-      seenIds.add(id);
-      return {
-        id,
-        name: f.name,
-        description: f.description,
-        materialCost: f.materialCost
-      };
-    });
-  };
-
   const costEstimate = useMemo(() => {
     if (useCache) {
       return {
@@ -110,43 +154,22 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         outputCost: 0,
         inputTokens: 0,
         outputTokens: 0,
-        totalCalls: 0
+        totalCalls: 0,
       };
     }
 
     const vehicle = vehiclesById[selectedVehicle];
     if (!vehicle) return null;
 
-    const { sets: numSets } = calculateOptimalSets(features.length);
-    const totalCalls = selectedPersonas.length * numSets;
+    const totalCalls = selectedPersonas.length * estimatedPlan.maxDiffSets.length;
     if (totalCalls === 0) return null;
 
-    const engineFeatures = buildEngineFeatures(features);
-    const featureCosts = engineFeatures.map(f => f.materialCost);
-    const vouchers = MaxDiffEngine.generateVouchers(featureCosts, {
-      min_discount: 10,
-      max_discount: 200,
-      levels: 6
-    });
-    const maxDiffSets = MaxDiffEngine.generateMaxDiffSets(
-      engineFeatures,
-      vouchers,
-      Math.max(3, Math.min(5, Math.ceil(engineFeatures.length / 5)))
-    );
-    const sampleSet = maxDiffSets[0];
+    const sampleSet = estimatedPlan.maxDiffSets[0];
     if (!sampleSet) return null;
-
-    const featureDescMap = new Map<string, string>();
-    engineFeatures.forEach(f => {
-      featureDescMap.set(f.id, f.description);
-    });
-    vouchers.forEach(v => {
-      featureDescMap.set(v.id, v.description);
-    });
 
     const vehicleForAnalysis = {
       brand: vehicle.manufacturer || vehicle.name,
-      name: vehicle.name
+      name: vehicle.name,
     };
 
     const personaTokenCounts = selectedPersonas.map((personaId) => {
@@ -156,7 +179,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
     const avgSystemTokens = personaTokenCounts.length
       ? personaTokenCounts.reduce((sum, value) => sum + value, 0) / personaTokenCounts.length
       : 0;
-    const userTokens = estimateTokens(buildUserPrompt(sampleSet, vehicleForAnalysis, featureDescMap));
+    const userTokens = estimateTokens(buildUserPrompt(sampleSet, vehicleForAnalysis, estimatedPlan.featureDescMap));
 
     const perCallInputTokens = avgSystemTokens + userTokens;
     const perCallOutputTokens = 200;
@@ -164,7 +187,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
     let inputTokens = Math.round(perCallInputTokens * totalCalls);
     let outputTokens = Math.round(perCallOutputTokens * totalCalls);
 
-    const voucherPrompt = buildVoucherPrompt(new Map(engineFeatures.map((f) => [f.name, f.description])));
+    const voucherPrompt = buildVoucherPrompt(new Map(engineFeatures.map((feature) => [feature.name, feature.description])));
     const voucherInputTokens = estimateTokens('You are an automotive pricing expert.') + estimateTokens(voucherPrompt);
     inputTokens += voucherInputTokens;
     outputTokens += 80;
@@ -180,9 +203,9 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
       outputCost,
       inputTokens,
       outputTokens,
-      totalCalls
+      totalCalls,
     };
-  }, [features, personasById, selectedModel, selectedPersonas, selectedVehicle, serviceTier, useCache, vehiclesById]);
+  }, [engineFeatures, estimatedPlan, personasById, selectedModel, selectedPersonas, selectedVehicle, serviceTier, useCache, vehiclesById]);
 
   // Defensive guards: ensure prerequisites are present to avoid runtime crashes
   if (!selectedVehicle || selectedPersonas.length === 0 || features.length === 0) {
@@ -196,7 +219,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
   }
 
   const runAnalysis = async () => {
-    if (!hasApiKey) {
+    if (!hasApiKey && !useCache) {
       setAnalysisStatus('API key required');
       toast({
         title: "API key required",
@@ -216,15 +239,59 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
     let callsDone = 0;
 
     try {
-      const callLogs: MaxDiffCallLog[] = [];
-      const { sets: numSets } = calculateOptimalSets(features.length);
-      const totalCalls = selectedPersonas.length * numSets;
-      const results = new Map<string, PerceivedValue[]>();
+      const vehicle = vehiclesById[selectedVehicle];
+      if (!vehicle) {
+        throw new Error(`Invalid vehicle ${selectedVehicle}`);
+      }
 
-      // Initialize LLM client
       const storedModelConfig = getStoredModelConfig();
       setSelectedModel(storedModelConfig.model);
       setServiceTier(storedModelConfig.serviceTier);
+
+      const cacheKeyByPersona = new Map(
+        selectedPersonas.map((personaId) => [
+          personaId,
+          buildAnalysisCacheKey({
+            vehicleId: selectedVehicle,
+            personaId,
+            model: storedModelConfig.model,
+            serviceTier: storedModelConfig.serviceTier,
+            features: engineFeatures,
+          }),
+        ])
+      );
+
+      if (useCache) {
+        const cachedResults = new Map<string, PerceivedValue[]>();
+        const missingPersonas: string[] = [];
+
+        for (const personaId of selectedPersonas) {
+          const cacheKey = cacheKeyByPersona.get(personaId);
+          const cached = cacheKey ? localStorage.getItem(cacheKey) : null;
+          if (!cached) {
+            missingPersonas.push(getPersonaName(personaId));
+            continue;
+          }
+          try {
+            cachedResults.set(personaId, JSON.parse(cached));
+          } catch {
+            missingPersonas.push(getPersonaName(personaId));
+          }
+        }
+
+        if (missingPersonas.length > 0) {
+          throw new Error(`Cached results not found for: ${missingPersonas.join(', ')}`);
+        }
+
+        onAnalysisComplete(cachedResults, []);
+        setAnalysisStatus('Loaded cached results.');
+        setProgress(100);
+        return;
+      }
+
+      const callLogs: MaxDiffCallLog[] = [];
+      const results = new Map<string, PerceivedValue[]>();
+
       const llmClient = new LLMClient({
         apiKey,
         model: storedModelConfig.model,
@@ -234,89 +301,60 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         temperature: 0.2,
       });
 
-      // Prepare feature descriptions for voucher bounds
       const featureDescriptions = new Map(
-        features.map(f => [f.name, f.description])
+        engineFeatures.map((feature) => [feature.name, feature.description])
       );
 
-      // Get AI-recommended voucher bounds
       const voucherBounds = await llmClient.recommendVoucherBounds(featureDescriptions);
-      
-      for (const personaName of selectedPersonas) {
-        setCurrentPersona(getPersonaName(personaName));
-        
-        // Check cache first
-        const cacheKey = `maxdiff_${selectedVehicle}_${personaName}`;
-        if (useCache) {
-          const cached = localStorage.getItem(cacheKey);
-          if (cached) {
-            try {
-              const cachedResults = JSON.parse(cached);
-              results.set(personaName, cachedResults);
-              continue;
-            } catch (e) {
-              console.warn('Failed to parse cached results:', e);
-            }
-          }
+      const analysisPlan = buildAnalysisPlan(engineFeatures, voucherBounds);
+      const totalCalls = selectedPersonas.length * analysisPlan.maxDiffSets.length;
+
+      if (totalCalls === 0 || analysisPlan.maxDiffSets.length === 0) {
+        throw new Error('No analysis sets could be generated from current features.');
+      }
+
+      const updateTiming = () => {
+        const elapsed = (Date.now() - startTime) / 1000;
+        const avgPerCall = callsDone > 0 ? elapsed / callsDone : 0;
+        const remaining = Math.max(0, totalCalls - callsDone);
+        setElapsedTime(Math.floor(elapsed));
+        setEta(Math.floor(avgPerCall * remaining));
+        setProgress((callsDone / totalCalls) * 100);
+      };
+
+      const vehicleForAnalysis = {
+        brand: vehicle.manufacturer || vehicle.name,
+        name: vehicle.name,
+      };
+
+      for (const personaId of selectedPersonas) {
+        setCurrentPersona(getPersonaName(personaId));
+
+        const persona = personasById[personaId];
+        if (!persona) {
+          throw new Error(`Invalid persona ${personaId}`);
         }
 
-        const persona = personasById[personaName];
-        const vehicle = vehiclesById[selectedVehicle];
-        
-        if (!persona || !vehicle) {
-          throw new Error(`Invalid persona ${personaName} or vehicle ${selectedVehicle}`);
-        }
+        setAnalysisStatus(`Starting analysis for ${personaId}...`);
+        const responses: RawResponse[] = [];
 
-        // Transform vehicle to match LLM client expectations
-        const vehicleForAnalysis = {
-          brand: vehicle.manufacturer || vehicle.name,
-          name: vehicle.name
-        };
+        for (let index = 0; index < analysisPlan.maxDiffSets.length; index++) {
+          const maxDiffSet = analysisPlan.maxDiffSets[index];
+          setCurrentSet(index + 1);
+          setAnalysisStatus(`${personaId}: Analyzing set ${index + 1}/${analysisPlan.maxDiffSets.length}`);
 
-        setAnalysisStatus(`Starting analysis for ${personaName}...`);
-
-        // Convert features to proper format with unique IDs
-        const engineFeatures = buildEngineFeatures(features);
-
-        // Generate vouchers with AI bounds
-        const featureCosts = engineFeatures.map(f => f.materialCost);
-        const vouchers = MaxDiffEngine.generateVouchers(featureCosts, voucherBounds);
-        
-        // Generate MaxDiff sets
-        const maxDiffSets = MaxDiffEngine.generateMaxDiffSets(
-          engineFeatures,
-          vouchers,
-          Math.max(3, Math.min(5, Math.ceil(engineFeatures.length / 5)))
-        );
-        
-        // Create feature descriptions map
-        const featureDescMap = new Map<string, string>();
-        engineFeatures.forEach(f => {
-          featureDescMap.set(f.id, f.description);
-        });
-        vouchers.forEach(v => {
-          featureDescMap.set(v.id, v.description);
-        });
-
-        // Collect responses
-        const responses = [];
-
-        for (let i = 0; i < maxDiffSets.length; i++) {
-          setCurrentSet(i + 1);
-          setAnalysisStatus(`${personaName}: Analyzing set ${i + 1}/${maxDiffSets.length}`);
-          
           try {
             const timestamp = new Date().toISOString();
-            const displayedFeatures = maxDiffSets[i].options.map(option => option.name);
-            const optionNameById = new Map(maxDiffSets[i].options.map(option => [option.id, option.name]));
+            const displayedFeatures = maxDiffSet.options.map((option) => option.name);
+            const optionNameById = new Map(maxDiffSet.options.map((option) => [option.id, option.name]));
 
             const response = await llmClient.rankOptions(
-              maxDiffSets[i],
+              maxDiffSet,
               persona,
               vehicleForAnalysis,
-              featureDescMap
+              analysisPlan.featureDescMap
             );
-            
+
             responses.push(response);
             callLogs.push({
               timestamp,
@@ -324,75 +362,58 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
               mostValued: optionNameById.get(response.mostValued) ?? response.mostValued,
               leastValued: optionNameById.get(response.leastValued) ?? response.leastValued,
             });
-            callsDone++;
-
-            // Update timing
-            const elapsed = (Date.now() - startTime) / 1000;
-            const avgPerCall = elapsed / callsDone;
-            const remaining = totalCalls - callsDone;
-            setElapsedTime(Math.floor(elapsed));
-            setEta(Math.floor(avgPerCall * remaining));
-            setProgress((callsDone / totalCalls) * 100);
-            
           } catch (error) {
-            console.error(`Error processing set ${i + 1}:`, error);
-            
-            // Fallback to random selection
-            const options = maxDiffSets[i].options;
-            const mostValued = options[Math.floor(Math.random() * options.length)].id;
-            const leastValued = options.filter(o => o.id !== mostValued)[Math.floor(Math.random() * (options.length - 1))].id;
-            
-            responses.push({
-              setId: maxDiffSets[i].id,
-              personaId: persona.id,
-              mostValued,
-              leastValued,
-              ranking: []
-            });
+            console.error(`Error processing set ${index + 1}:`, error);
+            const optionIds = maxDiffSet.options.map((option) => option.id);
+            const fallback = buildFallbackRanking(optionIds);
             const timestamp = new Date().toISOString();
-            const optionNameById = new Map(maxDiffSets[i].options.map(option => [option.id, option.name]));
+            const optionNameById = new Map(maxDiffSet.options.map((option) => [option.id, option.name]));
+
+            responses.push({
+              setId: maxDiffSet.id,
+              personaId: persona.id,
+              mostValued: fallback.mostValued,
+              leastValued: fallback.leastValued,
+              ranking: fallback.ranking,
+            });
+
             callLogs.push({
               timestamp,
-              displayedFeatures: maxDiffSets[i].options.map(option => option.name),
-              mostValued: optionNameById.get(mostValued) ?? mostValued,
-              leastValued: optionNameById.get(leastValued) ?? leastValued,
+              displayedFeatures: maxDiffSet.options.map((option) => option.name),
+              mostValued: optionNameById.get(fallback.mostValued) ?? fallback.mostValued,
+              leastValued: optionNameById.get(fallback.leastValued) ?? fallback.leastValued,
             });
-            callsDone++;
-            
-            const elapsed = (Date.now() - startTime) / 1000;
-            const avgPerCall = elapsed / callsDone;
-            const remaining = totalCalls - callsDone;
-            setElapsedTime(Math.floor(elapsed));
-            setEta(Math.floor(avgPerCall * remaining));
-            setProgress((callsDone / totalCalls) * 100);
           }
-          
+
+          callsDone++;
+          updateTiming();
+
           // Small delay to avoid rate limiting
-          await new Promise(resolve => setTimeout(resolve, 200));
+          await new Promise((resolve) => setTimeout(resolve, 200));
         }
 
-        // Compute perceived values
         const perceivedValues = MaxDiffEngine.computePerceivedValues(
           responses,
           engineFeatures,
-          vouchers
+          analysisPlan.vouchers
         );
 
-        results.set(personaName, perceivedValues);
+        results.set(personaId, perceivedValues);
 
-        // Cache results
-        localStorage.setItem(cacheKey, JSON.stringify(perceivedValues));
+        const cacheKey = cacheKeyByPersona.get(personaId);
+        if (cacheKey) {
+          localStorage.setItem(cacheKey, JSON.stringify(perceivedValues));
+        }
       }
 
       onAnalysisComplete(results, callLogs);
       setAnalysisStatus('Analysis complete!');
-
+      setProgress(100);
     } catch (error) {
       console.error('Analysis failed:', error);
       setAnalysisStatus(`Analysis failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsAnalyzing(false);
-      setProgress(0);
       setCurrentPersona('');
       setElapsedTime(0);
       setEta(0);
@@ -406,7 +427,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         <p className="text-muted-foreground">AI-powered persona simulation for feature valuation</p>
       </div>
 
-      {!hasApiKey && (
+      {!hasApiKey && !useCache && (
         <Alert>
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>API key required</AlertTitle>
@@ -504,7 +525,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         </label>
       </div>
 
-      {!hasApiKey ? (
+      {!hasApiKey && !useCache ? (
         <ApiKeyInput onApiKeySet={handleApiKeySet} hasApiKey={hasApiKey} />
       ) : !isAnalyzing ? (
         <Card className="text-center">
@@ -515,12 +536,11 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Button 
+            <Button
               onClick={runAnalysis}
               size="lg"
               variant="analytics"
               className="px-8"
-              disabled={!hasApiKey}
             >
               <Brain className="h-5 w-5 mr-2" />
               Start MaxDiff Analysis
@@ -546,20 +566,20 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
               </div>
               <Progress value={progress} className="h-2" />
             </div>
-            
+
             {currentPersona && (
               <div className="text-center">
                 <p className="text-sm font-medium mb-1">Analyzing: <strong>{currentPersona}</strong></p>
               </div>
             )}
-            
+
             <div className="text-center">
               <p className="text-sm font-medium mb-1">Current Set: {currentSet}</p>
               <p className="text-sm text-muted-foreground">{analysisStatus}</p>
             </div>
-            
+
             <div className="text-center text-xs text-muted-foreground">
-              ⏱ Elapsed: <strong>{Math.floor(elapsedTime / 60)}m {elapsedTime % 60}s</strong> · 
+              ⏱ Elapsed: <strong>{Math.floor(elapsedTime / 60)}m {elapsedTime % 60}s</strong> ·
               ETA: <strong>{Math.floor(eta / 60)}m {eta % 60}s</strong>
             </div>
 

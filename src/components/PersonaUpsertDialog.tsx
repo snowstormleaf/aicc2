@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import type { CustomerPersona } from "@/personas/types";
 import { buildPersonaFormDefaults } from "@/lib/form-defaults";
+import { requestStructuredObject } from "@/lib/openai-responses";
 
 function splitLines(v: string) {
   return v
@@ -27,17 +28,6 @@ function newIdFromName(name: string) {
   const base = slugify(name) || "persona";
   const rand = Math.random().toString(16).slice(2, 8);
   return `${base}-${rand}`;
-}
-
-function extractJsonObject(text: string): string {
-  // Works with plain JSON or fenced ```json blocks
-  const fence = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  if (fence?.[1]) return fence[1].trim();
-
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start >= 0 && end > start) return text.slice(start, end + 1);
-  return text.trim();
 }
 
 async function aiGeneratePersona(apiKey: string, brief: string): Promise<Partial<CustomerPersona>> {
@@ -65,31 +55,12 @@ Return ONLY a single JSON object (no markdown) with this shape:
 }
   `.trim();
 
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "gpt-4.1-mini-2025-04-14",
-      temperature: 0.2,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: `Persona brief:\n${brief}` },
-      ],
-    }),
+  return requestStructuredObject<Partial<CustomerPersona>>({
+    apiKey,
+    instructions: system,
+    input: `Persona brief:\n${brief}`,
+    maxOutputTokens: 1600,
   });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`OpenAI error (${res.status}): ${errText}`);
-  }
-
-  const data = await res.json();
-  const content = data?.choices?.[0]?.message?.content ?? "";
-  const json = extractJsonObject(String(content));
-  return JSON.parse(json) as Partial<CustomerPersona>;
 }
 
 export function PersonaUpsertDialog(props: {

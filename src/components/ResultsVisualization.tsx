@@ -7,6 +7,7 @@ import { TrendingUp, Download, FileSpreadsheet } from "lucide-react";
 import { PerceivedValue } from "@/lib/maxdiff-engine";
 import type { MaxDiffCallLog } from "@/types/analysis";
 import { createXlsxBlob } from "@/lib/xlsx-utils";
+import { classifyValueRatio, formatRatio, getValueRatio } from "@/lib/value-metrics";
 
 interface ResultsVisualizationProps {
   results: Map<string, PerceivedValue[]>;
@@ -21,9 +22,10 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
     
     for (const [persona, perceivedValues] of results.entries()) {
       csvContent += perceivedValues.map(r => {
-        const ratio = r.perceivedValue / r.materialCost;
-        const category = ratio > 1.2 ? 'High Value' : ratio < 0.8 ? 'Low Value' : 'Fair Value';
-        return `"${persona}","${r.featureName}","Feature ${r.featureId}",${r.materialCost},${r.perceivedValue.toFixed(2)},${ratio.toFixed(2)},${category}`;
+        const ratio = getValueRatio(r.perceivedValue, r.materialCost);
+        const category = classifyValueRatio(ratio);
+        const ratioLabel = ratio == null ? "N/A" : ratio.toFixed(2);
+        return `"${persona}","${r.featureName}","Feature ${r.featureId}",${r.materialCost},${r.perceivedValue.toFixed(2)},${ratioLabel},${category}`;
       }).join('\n') + '\n';
     }
     
@@ -112,7 +114,10 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
     }
   }
 
-  const maxValue = Math.max(...allData.map(d => Math.max(d.materialCost, d.perceivedValue))) * 1.1;
+  const maxDataPoint = allData.length
+    ? Math.max(...allData.map(d => Math.max(d.materialCost, d.perceivedValue)))
+    : 1;
+  const maxValue = Math.max(1, maxDataPoint * 1.1);
 
   // Calculate 60-degree reference line
   const minCost = Math.min(...allData.map(d => d.materialCost));
@@ -150,7 +155,14 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
       if (!data) {
         return null;
       }
-      const ratio = data.perceivedValue / data.materialCost;
+      const ratio = getValueRatio(data.perceivedValue, data.materialCost);
+      const ratioClass = ratio == null
+        ? "text-muted-foreground"
+        : ratio > 1.2
+          ? "text-data-positive"
+          : ratio < 0.8
+            ? "text-data-negative"
+            : "text-muted-foreground";
       return (
         <div className="bg-card border rounded-lg p-3 shadow-lg">
           <p className="font-medium text-sm">{data.featureName}</p>
@@ -158,8 +170,8 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
           <div className="space-y-1 text-xs">
             <p>Material Cost: <span className="font-medium">${data.materialCost}</span></p>
             <p>Perceived Value: <span className="font-medium">${data.perceivedValue.toFixed(0)}</span></p>
-            <p>Value Ratio: <span className={`font-medium ${ratio > 1.2 ? 'text-data-positive' : ratio < 0.8 ? 'text-data-negative' : 'text-muted-foreground'}`}>
-              {ratio.toFixed(2)}x
+            <p>Value Ratio: <span className={`font-medium ${ratioClass}`}>
+              {formatRatio(ratio)}
             </span></p>
           </div>
         </div>
@@ -342,7 +354,7 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
                                 {result.netScore}
                               </td>
                               <td className="border border-gray-300 px-4 py-2 text-right">
-                                {(result.perceivedValue / result.materialCost).toFixed(2)}x
+                                {formatRatio(getValueRatio(result.perceivedValue, result.materialCost))}
                               </td>
                             </tr>
                           ))}
