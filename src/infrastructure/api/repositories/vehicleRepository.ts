@@ -11,7 +11,7 @@ export interface VehicleRepository {
 export class VehicleApiRepository implements VehicleRepository {
   private client: HttpClient;
 
-  constructor(baseUrl: string = import.meta.env.VITE_API_URL || 'http://localhost:3001/api') {
+  constructor(baseUrl: string = import.meta.env?.VITE_API_URL || 'http://localhost:3001/api') {
     this.client = new HttpClient(baseUrl);
   }
 

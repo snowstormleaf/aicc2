@@ -9,7 +9,7 @@
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
-    "test": "node --test",
+    "test": "node --import ./tests/register-ts-loader.mjs --test",
     "preview": "vite preview"
   },
   "dependencies": {

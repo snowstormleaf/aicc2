@@ -18,9 +18,7 @@ export interface SetupHealthResult {
   checkedAt: string;
 }
 
-const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
-
-const readApiKey = () => (localStorage.getItem('openai_api_key') ?? '').trim();
+const apiBaseUrl = import.meta.env?.VITE_API_URL || 'http://localhost:3001/api';
 
 const withTimeout = async (input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = 3500) => {
   const controller = new AbortController();
@@ -44,33 +42,36 @@ const createCheck = (
 export const runSetupHealthChecks = async (): Promise<SetupHealthResult> => {
   const checks: SetupCheck[] = [];
 
-  const apiKey = readApiKey();
-  if (!apiKey) {
+  try {
+    const response = await withTimeout(`${apiBaseUrl}/llm/status`, { method: 'GET' });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload?.configured) {
+      checks.push(createCheck(
+        'api-key',
+        'OpenAI API key',
+        payload?.message || 'OPENAI_API_KEY is not configured on the backend.',
+        'error',
+        true,
+        'Set OPENAI_API_KEY in your backend environment and restart the backend process.'
+      ));
+    } else {
+      checks.push(createCheck(
+        'api-key',
+        'OpenAI API key',
+        'Server-side OpenAI API key is configured.',
+        'healthy',
+        true,
+        'No action needed.'
+      ));
+    }
+  } catch (error) {
     checks.push(createCheck(
       'api-key',
       'OpenAI API key',
-      'No key provided.',
+      `Unable to verify key status (${error instanceof Error ? error.message : 'Network error'}).`,
       'error',
       true,
-      'Open Configuration > OpenAI API Configuration and paste an API key that starts with "sk-".'
-    ));
-  } else if (!apiKey.startsWith('sk-')) {
-    checks.push(createCheck(
-      'api-key',
-      'OpenAI API key',
-      'Invalid format: expected key starting with "sk-".',
-      'error',
-      true,
-      'Replace the current API key with a valid OpenAI key that starts with "sk-".'
-    ));
-  } else {
-    checks.push(createCheck(
-      'api-key',
-      'OpenAI API key',
-      'Key found in local storage.',
-      'healthy',
-      true,
-      'No action needed.'
+      'Start backend and verify /api/llm/status is reachable.'
     ));
   }
 

@@ -55,3 +55,21 @@ Yes, you can!
 To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
 
 Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+
+
+## Local backend + OpenAI setup
+
+Run both services for persistence + AI features:
+
+```sh
+# Terminal 1
+cd backend
+npm i
+OPENAI_API_KEY="sk-..." npm run dev
+
+# Terminal 2
+npm i
+npm run dev
+```
+
+The browser talks only to backend `/api/llm/*` endpoints; keep `OPENAI_API_KEY` server-side.

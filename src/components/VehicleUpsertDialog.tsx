@@ -30,7 +30,7 @@ function newIdFromName(name: string) {
   return `${base}-${rand}`;
 }
 
-async function aiGenerateVehicle(apiKey: string, brief: string): Promise<Partial<Vehicle>> {
+async function aiGenerateVehicle(brief: string): Promise<Partial<Vehicle>> {
   const system = `
 You create vehicle specifications.
 Return ONLY a single JSON object (no markdown) with this shape:
@@ -47,7 +47,6 @@ Return ONLY a single JSON object (no markdown) with this shape:
   `.trim();
 
   return requestStructuredObject<Partial<Vehicle>>({
-    apiKey,
     instructions: system,
     input: `Vehicle brief:\n${brief}`,
     maxOutputTokens: 1000,
@@ -131,12 +130,7 @@ export function VehicleUpsertDialog(props: {
 
     setAiBusy(true);
     try {
-      const apiKey = localStorage.getItem("openai_api_key");
-      if (!apiKey) {
-        throw new Error("OpenAI API key not found. Please set it in Configuration.");
-      }
-
-      const result = await aiGenerateVehicle(apiKey, finalBrief);
+      const result = await aiGenerateVehicle(finalBrief);
 
       setName(result.name ?? "");
       setBrand(result.brand ?? result.manufacturer ?? "");

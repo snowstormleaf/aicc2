@@ -11,7 +11,7 @@ export interface PersonaRepository {
 export class PersonaApiRepository implements PersonaRepository {
   private client: HttpClient;
 
-  constructor(baseUrl: string = import.meta.env.VITE_API_URL || 'http://localhost:3001/api') {
+  constructor(baseUrl: string = import.meta.env?.VITE_API_URL || 'http://localhost:3001/api') {
     this.client = new HttpClient(baseUrl);
   }
 

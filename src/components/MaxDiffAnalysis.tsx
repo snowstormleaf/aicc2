@@ -123,7 +123,6 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
   const [progress, setProgress] = useState(0);
   const [currentSet, setCurrentSet] = useState(0);
   const [analysisStatus, setAnalysisStatus] = useState<string>('');
-  const [apiKey, setApiKey] = useState<string>('');
   const [hasApiKey, setHasApiKey] = useState(false);
   const [currentPersona, setCurrentPersona] = useState('');
   const [elapsedTime, setElapsedTime] = useState(0);
@@ -180,14 +179,6 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
   };
 
   useEffect(() => {
-    const storedKey = localStorage.getItem('openai_api_key');
-    if (storedKey) {
-      setApiKey(storedKey);
-      setHasApiKey(true);
-    }
-  }, []);
-
-  useEffect(() => {
     const updateModelConfig = () => {
       const stored = getStoredModelConfig();
       setSelectedModel(stored.model);
@@ -215,9 +206,8 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
     };
   }, []);
 
-  const handleApiKeySet = (key: string) => {
-    setApiKey(key);
-    setHasApiKey(!!key);
+  const handleApiKeySet = (isPresent: boolean) => {
+    setHasApiKey(isPresent);
   };
 
   const costEstimate = useMemo(() => {
@@ -253,7 +243,8 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
     const avgSystemTokens = personaTokenCounts.length
       ? personaTokenCounts.reduce((sum, value) => sum + value, 0) / personaTokenCounts.length
       : 0;
-    const userTokens = estimateTokens(buildUserPrompt(sampleSet, vehicleForAnalysis, estimatedPlan.featureDescMap));
+    const samplePersona = selectedPersonas.map((id) => personasById[id]).find(Boolean);
+    const userTokens = estimateTokens(buildUserPrompt(sampleSet, vehicleForAnalysis, estimatedPlan.featureDescMap, samplePersona ?? { id: 'buyer', name: 'buyer' }));
 
     const perCallInputTokens = avgSystemTokens + userTokens;
     const perCallOutputTokens = 200;
@@ -298,10 +289,10 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
 
   const runAnalysis = async () => {
     if (!hasApiKey && !useCache) {
-      setAnalysisStatus('API key required');
+      setAnalysisStatus('Server OpenAI key required');
       toast({
-        title: "API key required",
-        description: "Add your OpenAI API key in Workspace → Configuration before running analysis.",
+        title: "Server OpenAI key required",
+        description: "Configure OPENAI_API_KEY on the backend (see Configuration) before running analysis.",
         variant: "destructive",
       });
       return;
@@ -395,7 +386,6 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
       };
 
       const llmClient = new LLMClient({
-        apiKey,
         model: storedModelConfig.model,
         reasoningModel: storedModelConfig.model,
         serviceTier: storedModelConfig.serviceTier,
@@ -583,7 +573,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
       {!hasApiKey && !useCache && (
         <Alert>
           <AlertCircle className="h-4 w-4" />
-          <AlertTitle>API key required</AlertTitle>
+          <AlertTitle>Server OpenAI key required</AlertTitle>
           <AlertDescription>
             Add your OpenAI API key in Workspace → Configuration to run MaxDiff analysis.
           </AlertDescription>

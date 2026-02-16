@@ -10,6 +10,8 @@ import {
   PersonaBatchSchema,
   VehicleSchema,
   VehicleBatchSchema,
+  LlmResponseRequestSchema,
+  LlmVoucherBoundsSchema,
   validateRequest,
 } from './schemas.js';
 import {
@@ -20,6 +22,7 @@ import {
   requestLogger,
   ValidationError,
   DatabaseError,
+  AppError,
   createHealthCheck,
 } from './errors.js';
 
@@ -109,6 +112,78 @@ function parseVehicle(v) {
   };
 }
 
+
+const PERSONA_UPSERT_SQL = `INSERT OR REPLACE INTO personas (
+  id, name, summary, attributes, demographics, motivations, painPoints,
+  buyingBehavior, traits, tags, goals, jobsToBeDone, decisionCriteria,
+  objections, channels, preferredContent, meta, createdAt, updatedAt
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+const VEHICLE_UPSERT_SQL = `INSERT OR REPLACE INTO vehicles (
+  id, name, manufacturer, model, year, description, tags, createdAt, updatedAt
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+function personaToParams(persona) {
+  return [
+    persona.id,
+    persona.name,
+    persona.summary || null,
+    JSON.stringify(persona.attributes || {}),
+    JSON.stringify(persona.demographics || {}),
+    JSON.stringify(persona.motivations || []),
+    JSON.stringify(persona.painPoints || []),
+    JSON.stringify(persona.buyingBehavior || []),
+    JSON.stringify(persona.traits || []),
+    JSON.stringify(persona.tags || []),
+    JSON.stringify(persona.goals || []),
+    JSON.stringify(persona.jobsToBeDone || []),
+    JSON.stringify(persona.decisionCriteria || []),
+    JSON.stringify(persona.objections || []),
+    JSON.stringify(persona.channels || []),
+    JSON.stringify(persona.preferredContent || []),
+    JSON.stringify(persona.meta || {}),
+    persona.createdAt || new Date().toISOString(),
+    persona.updatedAt || new Date().toISOString(),
+  ];
+}
+
+function vehicleToParams(vehicle) {
+  return [
+    vehicle.id,
+    vehicle.name,
+    vehicle.manufacturer || null,
+    vehicle.model || null,
+    vehicle.year || null,
+    vehicle.description || null,
+    JSON.stringify(vehicle.tags || []),
+    vehicle.createdAt || new Date().toISOString(),
+    vehicle.updatedAt || new Date().toISOString(),
+  ];
+}
+
+async function callOpenAiResponses(payload) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new ValidationError('OPENAI_API_KEY is not configured on the backend server');
+  }
+
+  const response = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`OpenAI API error: ${response.status} ${response.statusText} ${errText}`);
+  }
+
+  return response.json();
+}
+
 // ===== PERSONAS ENDPOINTS =====
 
 app.get('/api/personas', async (req, res) => {
@@ -132,34 +207,7 @@ app.post('/api/personas', async (req, res) => {
 
     const persona = validation.data;
     
-    await db.run(
-      `INSERT OR REPLACE INTO personas (
-        id, name, summary, attributes, demographics, motivations, painPoints,
-        buyingBehavior, traits, tags, goals, jobsToBeDone, decisionCriteria,
-        objections, channels, preferredContent, meta, createdAt, updatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        persona.id,
-        persona.name,
-        persona.summary || null,
-        JSON.stringify(persona.attributes || {}),
-        JSON.stringify(persona.demographics || {}),
-        JSON.stringify(persona.motivations || []),
-        JSON.stringify(persona.painPoints || []),
-        JSON.stringify(persona.buyingBehavior || []),
-        JSON.stringify(persona.traits || []),
-        JSON.stringify(persona.tags || []),
-        JSON.stringify(persona.goals || []),
-        JSON.stringify(persona.jobsToBeDone || []),
-        JSON.stringify(persona.decisionCriteria || []),
-        JSON.stringify(persona.objections || []),
-        JSON.stringify(persona.channels || []),
-        JSON.stringify(persona.preferredContent || []),
-        JSON.stringify(persona.meta || {}),
-        persona.createdAt || new Date().toISOString(),
-        persona.updatedAt || new Date().toISOString()
-      ]
-    );
+    await db.run(PERSONA_UPSERT_SQL, personaToParams(persona));
     
     logger.info('Persona created/updated', { id: persona.id, name: persona.name });
     res.json(successResponse(persona, 'Persona saved'));
@@ -221,22 +269,7 @@ app.post('/api/vehicles', async (req, res) => {
 
     const vehicle = validation.data;
 
-    await db.run(
-      `INSERT OR REPLACE INTO vehicles (
-        id, name, manufacturer, model, year, description, tags, createdAt, updatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        vehicle.id,
-        vehicle.name,
-        vehicle.manufacturer || null,
-        vehicle.model || null,
-        vehicle.year || null,
-        vehicle.description || null,
-        JSON.stringify(vehicle.tags || []),
-        vehicle.createdAt || new Date().toISOString(),
-        vehicle.updatedAt || new Date().toISOString()
-      ]
-    );
+    await db.run(VEHICLE_UPSERT_SQL, vehicleToParams(vehicle));
 
     logger.info('Vehicle created/updated', { id: vehicle.id, name: vehicle.name });
     res.json(successResponse(vehicle, 'Vehicle saved'));
@@ -288,36 +321,16 @@ app.post('/api/sync/personas', async (req, res) => {
     const { personas } = validation.data;
     let inserted = 0;
 
-    for (const p of personas) {
-      const result = await db.run(
-        `INSERT OR REPLACE INTO personas (
-          id, name, summary, attributes, demographics, motivations, painPoints,
-          buyingBehavior, traits, tags, goals, jobsToBeDone, decisionCriteria,
-          objections, channels, preferredContent, meta, createdAt, updatedAt
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          p.id,
-          p.name,
-          p.summary || null,
-          JSON.stringify(p.attributes || {}),
-          JSON.stringify(p.demographics || {}),
-          JSON.stringify(p.motivations || []),
-          JSON.stringify(p.painPoints || []),
-          JSON.stringify(p.buyingBehavior || []),
-          JSON.stringify(p.traits || []),
-          JSON.stringify(p.tags || []),
-          JSON.stringify(p.goals || []),
-          JSON.stringify(p.jobsToBeDone || []),
-          JSON.stringify(p.decisionCriteria || []),
-          JSON.stringify(p.objections || []),
-          JSON.stringify(p.channels || []),
-          JSON.stringify(p.preferredContent || []),
-          JSON.stringify(p.meta || {}),
-          p.createdAt || new Date().toISOString(),
-          p.updatedAt || new Date().toISOString()
-        ]
-      );
-      inserted += result.changes;
+    await db.exec('BEGIN TRANSACTION');
+    try {
+      for (const p of personas) {
+        const result = await db.run(PERSONA_UPSERT_SQL, personaToParams(p));
+        inserted += result.changes;
+      }
+      await db.exec('COMMIT');
+    } catch (txError) {
+      await db.exec('ROLLBACK');
+      throw txError;
     }
 
     logger.info('Personas batch synced', { count: personas.length, inserted });
@@ -342,24 +355,16 @@ app.post('/api/sync/vehicles', async (req, res) => {
     const { vehicles } = validation.data;
     let inserted = 0;
 
-    for (const v of vehicles) {
-      const result = await db.run(
-        `INSERT OR REPLACE INTO vehicles (
-          id, name, manufacturer, model, year, description, tags, createdAt, updatedAt
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          v.id,
-          v.name,
-          v.manufacturer || null,
-          v.model || null,
-          v.year || null,
-          v.description || null,
-          JSON.stringify(v.tags || []),
-          v.createdAt || new Date().toISOString(),
-          v.updatedAt || new Date().toISOString()
-        ]
-      );
-      inserted += result.changes;
+    await db.exec('BEGIN TRANSACTION');
+    try {
+      for (const v of vehicles) {
+        const result = await db.run(VEHICLE_UPSERT_SQL, vehicleToParams(v));
+        inserted += result.changes;
+      }
+      await db.exec('COMMIT');
+    } catch (txError) {
+      await db.exec('ROLLBACK');
+      throw txError;
     }
 
     logger.info('Vehicles batch synced', { count: vehicles.length, inserted });
@@ -370,6 +375,82 @@ app.post('/api/sync/vehicles', async (req, res) => {
     }
     logger.error('POST /api/sync/vehicles failed', { error: err.message });
     res.status(500).json(errorResponse(new DatabaseError(err.message), 500));
+  }
+});
+
+
+
+// ===== LLM ENDPOINTS =====
+
+app.get('/api/llm/status', (req, res) => {
+  const configured = Boolean(process.env.OPENAI_API_KEY);
+  if (!configured) {
+    return res.status(503).json({
+      configured: false,
+      message: 'OPENAI_API_KEY is not configured on backend server',
+    });
+  }
+  return res.json({ configured: true });
+});
+
+app.post('/api/llm/structured', async (req, res) => {
+  try {
+    const validation = validateRequest(req.body, LlmResponseRequestSchema);
+    if (!validation.success) {
+      throw new ValidationError(validation.error);
+    }
+
+    const data = await callOpenAiResponses(validation.data);
+    return res.json(data);
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      return res.status(400).json(errorResponse(err, 400));
+    }
+    logger.error('POST /api/llm/structured failed', { error: err.message });
+    return res.status(500).json(errorResponse(new AppError(err.message, 500, 'LLM_ERROR'), 500));
+  }
+});
+
+app.post('/api/llm/voucher-bounds', async (req, res) => {
+  try {
+    const validation = validateRequest(req.body, LlmVoucherBoundsSchema);
+    if (!validation.success) {
+      throw new ValidationError(validation.error);
+    }
+    const { model = 'o4-mini-2025-04-16', prompt, max_output_tokens = 400, service_tier, temperature } = validation.data;
+
+    const data = await callOpenAiResponses({
+      model,
+      instructions: 'You are an automotive pricing expert.',
+      input: prompt,
+      max_output_tokens,
+      ...(service_tier ? { service_tier } : {}),
+      ...(temperature != null ? { temperature } : {}),
+    });
+    return res.json(data);
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      return res.status(400).json(errorResponse(err, 400));
+    }
+    logger.error('POST /api/llm/voucher-bounds failed', { error: err.message });
+    return res.status(500).json(errorResponse(new AppError(err.message, 500, 'LLM_ERROR'), 500));
+  }
+});
+
+app.post('/api/llm/rank-options', async (req, res) => {
+  try {
+    const validation = validateRequest(req.body, LlmResponseRequestSchema);
+    if (!validation.success) {
+      throw new ValidationError(validation.error);
+    }
+    const data = await callOpenAiResponses(validation.data);
+    return res.json(data);
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      return res.status(400).json(errorResponse(err, 400));
+    }
+    logger.error('POST /api/llm/rank-options failed', { error: err.message });
+    return res.status(500).json(errorResponse(new AppError(err.message, 500, 'LLM_ERROR'), 500));
   }
 });
 

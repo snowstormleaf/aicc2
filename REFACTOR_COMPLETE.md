@@ -248,7 +248,7 @@ src/
 
 **Backend:**
 - Express.js 4.18.2
-- SQLite 3 (via better-sqlite3 9.2.2)
+- SQLite3 runtime via `sqlite3` + `sqlite` packages
 - Zod 3.23.8 (validation)
 - Node.js (ES modules)
 

@@ -71,6 +71,29 @@ export const VehicleBatchSchema = z.object({
   vehicles: z.array(VehicleSchema),
 });
 
+
+
+// ===== LLM SCHEMAS =====
+
+export const LlmResponseRequestSchema = z.object({
+  model: z.string().min(1),
+  instructions: z.string().optional(),
+  input: z.string().min(1),
+  max_output_tokens: z.number().int().positive().optional(),
+  service_tier: z.string().optional(),
+  temperature: z.number().optional(),
+  tools: z.array(z.unknown()).optional(),
+  tool_choice: z.unknown().optional(),
+});
+
+export const LlmVoucherBoundsSchema = z.object({
+  model: z.string().min(1).optional(),
+  prompt: z.string().min(1),
+  max_output_tokens: z.number().int().positive().optional(),
+  service_tier: z.string().optional(),
+  temperature: z.number().optional(),
+});
+
 // ===== VALIDATION UTILITIES =====
 
 /**

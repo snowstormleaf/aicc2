@@ -46,12 +46,10 @@ const extractJsonObject = (text: string): string => {
 };
 
 export const requestStructuredObject = async <T>({
-  apiKey,
   instructions,
   input,
   maxOutputTokens = 1200,
 }: {
-  apiKey: string;
   instructions: string;
   input: string;
   maxOutputTokens?: number;
@@ -59,10 +57,11 @@ export const requestStructuredObject = async <T>({
   const { model, serviceTier } = getStoredModelConfig();
   const temperature = normalizeTemperature(0.2, model);
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
+  const apiBaseUrl = import.meta.env?.VITE_API_URL || "http://localhost:3001/api";
+
+  const response = await fetch(`${apiBaseUrl}/llm/structured`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({

@@ -1,7 +1,6 @@
 import { Feature, Voucher, MaxDiffSet, RawResponse } from './maxdiff-engine';
 
 export interface LLMConfig {
-  apiKey: string;
   model?: string;
   reasoningModel?: string;
   serviceTier?: 'standard' | 'flex';
@@ -78,7 +77,8 @@ CRITICAL: You must use the rank_value function to provide your response. Do not 
 export const buildUserPrompt = (
   set: MaxDiffSet,
   vehicle: { brand: string; name: string },
-  featureDescriptions: Map<string, string>
+  featureDescriptions: Map<string, string>,
+  persona: Pick<PersonaProfile, 'name' | 'id'>
 ): string => {
   const optionsText = set.options.map((option, index) => {
     const description = featureDescriptions.get(option.id) || option.description || 'No description available';
@@ -90,7 +90,7 @@ export const buildUserPrompt = (
 
 ${optionsText}
 
-As a ${featureDescriptions.get('persona_name') || 'buyer'}, please rank these options from MOST valuable to LEAST valuable to you personally.
+As ${persona.name}, please rank these options from MOST valuable to LEAST valuable to you personally.
 
 Consider:
 - Which option would be most important for your specific needs?
@@ -225,6 +225,8 @@ const mapServiceTier = (serviceTier?: 'standard' | 'flex'): string | undefined =
   return undefined;
 };
 
+const apiBaseUrl = import.meta.env?.VITE_API_URL || 'http://localhost:3001/api';
+
 const parseRankValuePayload = (payload: Record<string, unknown>) => {
   const most = payload.most_valued ?? payload.mostValued ?? payload.most;
   const least = payload.least_valued ?? payload.leastValued ?? payload.least;
@@ -263,16 +265,14 @@ export class LLMClient {
     const prompt = buildVoucherPrompt(featureDescriptions);
 
     try {
-      const response = await fetch('https://api.openai.com/v1/responses', {
+      const response = await fetch(`${apiBaseUrl}/llm/voucher-bounds`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${this.config.apiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           model: this.config.reasoningModel,
-          instructions: 'You are an automotive pricing expert.',
-          input: prompt,
+          prompt,
           max_output_tokens: 400,
           service_tier: mapServiceTier(this.config.serviceTier),
           temperature: normalizeTemperature(this.config.temperature, this.config.reasoningModel ?? '')
@@ -327,7 +327,7 @@ export class LLMClient {
     featureDescriptions: Map<string, string>
   ): Promise<RawResponse> {
     const systemPrompt = buildSystemPrompt(persona);
-    const userPrompt = buildUserPrompt(set, vehicle, featureDescriptions);
+    const userPrompt = buildUserPrompt(set, vehicle, featureDescriptions, persona);
     const model = this.config.model ?? 'gpt-4.1-mini-2025-04-14';
     let tokenCap = this.config.maxOutputTokens ?? 1024;
     let temperature = normalizeTemperature(this.config.temperature, model);
@@ -357,10 +357,9 @@ export class LLMClient {
           ...(temperature != null ? { temperature } : {}),
         };
 
-        const response = await fetch('https://api.openai.com/v1/responses', {
+        const response = await fetch(`${apiBaseUrl}/llm/rank-options`, {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${this.config.apiKey}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(requestPayload),

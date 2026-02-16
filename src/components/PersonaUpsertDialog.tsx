@@ -30,7 +30,7 @@ function newIdFromName(name: string) {
   return `${base}-${rand}`;
 }
 
-async function aiGeneratePersona(apiKey: string, brief: string): Promise<Partial<CustomerPersona>> {
+async function aiGeneratePersona(brief: string): Promise<Partial<CustomerPersona>> {
   const system = `
 You create customer/marketing/buyer personas.
 Return ONLY a single JSON object (no markdown) with this shape:
@@ -56,7 +56,6 @@ Return ONLY a single JSON object (no markdown) with this shape:
   `.trim();
 
   return requestStructuredObject<Partial<CustomerPersona>>({
-    apiKey,
     instructions: system,
     input: `Persona brief:\n${brief}`,
     maxOutputTokens: 1600,
@@ -194,11 +193,6 @@ export function PersonaUpsertDialog(props: {
 
   const handleGenerateFromAI = async () => {
     setError(null);
-    const apiKey = localStorage.getItem("openai_api_key") ?? "";
-    if (!apiKey) {
-      setError("No OpenAI API key found. Add it in Configuration first.");
-      return;
-    }
     if (!brief.trim()) {
       setError("Please enter a persona brief.");
       return;
@@ -206,7 +200,7 @@ export function PersonaUpsertDialog(props: {
 
     setAiBusy(true);
     try {
-      const partial = await aiGeneratePersona(apiKey, brief.trim());
+      const partial = await aiGeneratePersona(brief.trim());
       // Hydrate fields into the manual form (so user can edit before saving)
       setName(String(partial.name ?? "").trim());
       setSummary(String(partial.summary ?? "").trim());
@@ -287,7 +281,7 @@ export function PersonaUpsertDialog(props: {
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Uses the API key saved in Configuration (localStorage key: <code>openai_api_key</code>).
+              Uses the backend OpenAI integration configured via server environment variables.
             </p>
           </TabsContent>
 
