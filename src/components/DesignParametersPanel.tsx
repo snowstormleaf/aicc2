@@ -153,6 +153,19 @@ export const DesignParametersPanel = ({ featureCount }: DesignParametersPanelPro
                 onCheckedChange={(checked) => updateAnalysisSettings("showProgressUpdates", checked)}
               />
             </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">Hide material cost</p>
+                <p className="text-xs text-muted-foreground">
+                  In View Results, show feature perceived-value bars instead of the material-cost scatter chart.
+                </p>
+              </div>
+              <Switch
+                checked={analysisSettings.hideMaterialCost}
+                onCheckedChange={(checked) => updateAnalysisSettings("hideMaterialCost", checked)}
+              />
+            </div>
           </div>
         </CardContent>
       </Card>

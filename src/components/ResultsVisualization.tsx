@@ -1,6 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Slider } from "@/components/ui/slider";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   ScatterChart,
   Scatter,
@@ -22,6 +24,11 @@ import { PerceivedValue } from "@/lib/maxdiff-engine";
 import type { MaxDiffCallLog } from "@/types/analysis";
 import { createXlsxBlob } from "@/lib/xlsx-utils";
 import { classifyValueRatio, formatRatio, getValueRatio } from "@/lib/value-metrics";
+import { buildAxisLayout, buildBarLayout, buildDifferenceData } from "@/lib/results-chart";
+import {
+  ANALYSIS_SETTINGS_UPDATED_EVENT,
+  getStoredAnalysisSettings,
+} from "@/lib/analysis-settings";
 
 interface ResultsVisualizationProps {
   results: Map<string, PerceivedValue[]>;
@@ -36,6 +43,12 @@ type ScatterPoint = {
   netScore: number;
   persona: string;
 };
+
+type ValueOnlyRow = {
+  featureId: string;
+  featureName: string;
+  averageValue: number;
+} & Record<string, number | string>;
 
 const PERSONA_COLORS = ["#0ea5e9", "#22c55e", "#f97316", "#e11d48", "#a855f7", "#14b8a6"];
 
@@ -59,7 +72,53 @@ const getNiceAxisMax = (value: number) => {
 
 export const ResultsVisualization = ({ results, callLogs }: ResultsVisualizationProps) => {
   const [showDetails, setShowDetails] = useState(false);
-  const personas = Array.from(results.keys());
+  const [hideMaterialCost, setHideMaterialCost] = useState(() => getStoredAnalysisSettings().hideMaterialCost);
+  const [parityPercent, setParityPercent] = useState<number[]>([100]);
+
+  const personas = useMemo(() => Array.from(results.keys()), [results]);
+  const valueOnlySeries = useMemo(
+    () => personas.map((persona, index) => ({ persona, key: `value_${index}` })),
+    [personas]
+  );
+
+  const [personaA, setPersonaA] = useState<string>(personas[0] ?? "");
+  const [personaB, setPersonaB] = useState<string>(personas[1] ?? "");
+
+  useEffect(() => {
+    const sync = () => {
+      setHideMaterialCost(getStoredAnalysisSettings().hideMaterialCost);
+    };
+
+    const onStorage = (event: StorageEvent) => {
+      if (!event.key || event.key === "analysis_settings") {
+        sync();
+      }
+    };
+
+    sync();
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(ANALYSIS_SETTINGS_UPDATED_EVENT, sync);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(ANALYSIS_SETTINGS_UPDATED_EVENT, sync);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (personas.length === 0) {
+      setPersonaA("");
+      setPersonaB("");
+      return;
+    }
+
+    const nextA = personas.includes(personaA) ? personaA : personas[0];
+    const nextB = personas.includes(personaB) && personaB !== nextA
+      ? personaB
+      : personas.find((persona) => persona !== nextA) ?? nextA;
+
+    if (nextA !== personaA) setPersonaA(nextA);
+    if (nextB !== personaB) setPersonaB(nextB);
+  }, [personas, personaA, personaB]);
 
   const allData = useMemo(() => {
     const points: ScatterPoint[] = [];
@@ -86,26 +145,94 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
     return map;
   }, [allData, personas]);
 
+  const valueOnlyData = useMemo(() => {
+    const featureMap = new Map<string, ValueOnlyRow>();
+
+    for (const [persona, perceivedValues] of results.entries()) {
+      const seriesKey = valueOnlySeries.find((series) => series.persona === persona)?.key;
+      if (!seriesKey) continue;
+
+      for (const value of perceivedValues) {
+        const existing = featureMap.get(value.featureId);
+        if (existing) {
+          existing[seriesKey] = value.perceivedValue;
+          existing.averageValue =
+            valueOnlySeries.reduce((sum, series) => sum + Number(existing[series.key] ?? 0), 0) / valueOnlySeries.length;
+        } else {
+          const row: ValueOnlyRow = {
+            featureId: value.featureId,
+            featureName: value.featureName,
+            averageValue: 0,
+          };
+          valueOnlySeries.forEach((series) => {
+            row[series.key] = 0;
+          });
+          row[seriesKey] = value.perceivedValue;
+          row.averageValue = value.perceivedValue;
+          featureMap.set(value.featureId, row);
+        }
+      }
+    }
+
+    return Array.from(featureMap.values())
+      .map((row) => ({
+        ...row,
+        averageValue:
+          valueOnlySeries.reduce((sum, series) => sum + Number(row[series.key] ?? 0), 0) /
+          Math.max(1, valueOnlySeries.length),
+      }))
+      .sort((a, b) => Number(b.averageValue) - Number(a.averageValue));
+  }, [results, valueOnlySeries]);
+
   const maxMaterialCost = allData.length ? Math.max(...allData.map((d) => d.materialCost)) : 1;
   const maxPerceivedValue = allData.length ? Math.max(...allData.map((d) => d.perceivedValue)) : 1;
   const xAxisMax = getNiceAxisMax(maxMaterialCost * 1.05);
   const yAxisMax = getNiceAxisMax(maxPerceivedValue * 1.05);
-  const parityMax = Math.min(xAxisMax, yAxisMax);
+  const paritySlope = Math.max(0.01, (parityPercent[0] ?? 100) / 100);
+  const parityMaxX = Math.min(xAxisMax, yAxisMax / paritySlope);
 
   const differenceData = useMemo(() => {
-    if (personas.length !== 2) return [];
-    const persona1Results = results.get(personas[0]) ?? [];
-    const persona2Results = results.get(personas[1]) ?? [];
-    return persona1Results
-      .map((p1) => {
-        const p2 = persona2Results.find((p) => p.featureId === p1.featureId);
-        return {
-          feature: p1.featureId,
-          difference: p1.perceivedValue - (p2?.perceivedValue ?? 0),
-        };
-      })
-      .sort((a, b) => Math.abs(b.difference) - Math.abs(a.difference));
-  }, [personas, results]);
+    if (!personaA || !personaB || personaA === personaB) return [];
+    const persona1Results = results.get(personaA) ?? [];
+    const persona2Results = results.get(personaB) ?? [];
+    return buildDifferenceData(persona1Results, persona2Results);
+  }, [personaA, personaB, results]);
+
+  const valueOnlyAxisLayout = useMemo(
+    () => buildAxisLayout(valueOnlyData.map((row) => row.featureName)),
+    [valueOnlyData]
+  );
+  const differenceTopRows = useMemo(() => differenceData.slice(0, 10), [differenceData]);
+  const comparisonAxisLayout = useMemo(
+    () => buildAxisLayout(differenceTopRows.map((row) => row.feature)),
+    [differenceTopRows]
+  );
+  const differenceChartRows = useMemo(
+    () =>
+      differenceTopRows.map((row) => ({
+        ...row,
+        renderDifference: row.difference === 0 ? 0.0001 : row.difference,
+      })),
+    [differenceTopRows]
+  );
+  const valueOnlyBarLayout = useMemo(
+    () =>
+      buildBarLayout({
+        rowCount: valueOnlyData.length,
+        seriesCount: valueOnlySeries.length,
+        minHeight: 420,
+      }),
+    [valueOnlyData.length, valueOnlySeries.length]
+  );
+  const comparisonBarLayout = useMemo(
+    () =>
+      buildBarLayout({
+        rowCount: differenceChartRows.length,
+        seriesCount: 1,
+        minHeight: 320,
+      }),
+    [differenceChartRows.length]
+  );
 
   const downloadResults = () => {
     let csvContent = "Persona,Feature Name,Description,Material Cost (USD),Perceived Value (USD),Value Ratio,Category\n";
@@ -134,19 +261,22 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
   };
 
   const downloadExcel = () => {
-    const resultsRows: (string | number)[][] = [["Feature", "Material cost", "Value"]];
+    const resultsRows: (string | number)[][] = [["Feature", "Material cost", "Value", "Persona"]];
 
     personas.forEach((persona) => {
       const personaResults = results.get(persona) ?? [];
       const sortedResults = [...personaResults].sort((a, b) => b.perceivedValue - a.perceivedValue);
       sortedResults.forEach((result) => {
-        resultsRows.push([result.featureName, result.materialCost, result.perceivedValue]);
+        resultsRows.push([result.featureName, result.materialCost, result.perceivedValue, persona]);
       });
     });
 
     const callsRows: (string | number)[][] = [
       [
         "Timestamp (UTC)",
+        "Persona",
+        "Set",
+        "Status",
         "Displayed feature 1",
         "Displayed feature 2",
         "Displayed feature 3",
@@ -161,6 +291,9 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
       while (displayed.length < 4) displayed.push("");
       callsRows.push([
         log.timestamp,
+        log.personaName ?? "",
+        log.setId ?? "",
+        log.status ?? "",
         displayed[0] ?? "",
         displayed[1] ?? "",
         displayed[2] ?? "",
@@ -240,7 +373,11 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
     <div className="space-y-6">
       <div className="text-center">
         <h2 className="mb-2 text-2xl font-bold text-foreground">Perceived Feature Values</h2>
-        <p className="text-muted-foreground">Material cost vs. perceived customer value from MaxDiff analysis</p>
+        <p className="text-muted-foreground">
+          {hideMaterialCost
+            ? "Feature perceived value ranking"
+            : "Material cost vs. perceived customer value from MaxDiff analysis"}
+        </p>
       </div>
 
       <Card className="border-primary/10 bg-gradient-to-br from-card to-muted/20">
@@ -252,7 +389,9 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
                 AI Customer Clinic Results
               </CardTitle>
               <CardDescription>
-                Scatter plot of perceived customer value (Y-axis) vs feature material cost (X-axis)
+                {hideMaterialCost
+                  ? "Perceived value only, sorted high-to-low"
+                  : "Scatter plot of perceived customer value (Y-axis) vs feature material cost (X-axis)"}
               </CardDescription>
             </div>
             <div className="flex gap-2">
@@ -268,96 +407,191 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
           </div>
         </CardHeader>
         <CardContent>
-          <div className="h-96 w-full rounded-md border bg-background/60 p-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <ScatterChart margin={{ top: 20, right: 30, bottom: 30, left: 20 }}>
-                <CartesianGrid strokeDasharray="4 4" stroke="hsl(var(--border))" />
-                <XAxis
-                  type="number"
-                  dataKey="materialCost"
-                  name="Material Cost"
-                  domain={[0, xAxisMax]}
-                  tick={{ fontSize: 12 }}
-                  tickFormatter={(value) => formatCurrencyInt(Number(value))}
-                  label={{ value: "Feature material cost", position: "insideBottom", offset: -10 }}
-                />
-                <YAxis
-                  type="number"
-                  dataKey="perceivedValue"
-                  name="Perceived Value"
-                  domain={[0, yAxisMax]}
-                  tick={{ fontSize: 12 }}
-                  tickFormatter={(value) => formatCurrencyInt(Number(value))}
-                  label={{ value: "Perceived customer value", angle: -90, position: "insideLeft" }}
-                />
-                <Tooltip content={<CustomTooltip />} />
-                <Legend verticalAlign="top" align="right" wrapperStyle={{ fontSize: "12px" }} />
-                <ReferenceLine
-                  segment={[
-                    { x: 0, y: 0 },
-                    { x: parityMax, y: parityMax },
-                  ]}
-                  stroke="#64748b"
-                  strokeDasharray="5 5"
-                />
-                {personas.map((persona, index) => (
-                  <Scatter
-                    key={persona}
-                    data={byPersona.get(persona) ?? []}
-                    name={persona}
-                    fill={PERSONA_COLORS[index % PERSONA_COLORS.length]}
-                    stroke={PERSONA_COLORS[index % PERSONA_COLORS.length]}
-                    fillOpacity={0.82}
-                    strokeWidth={1.5}
-                  />
-                ))}
-              </ScatterChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="mt-4 flex items-center justify-center gap-6 text-sm text-muted-foreground">
-            <div className="flex items-center gap-2">
-              <div className="h-0.5 w-3 bg-slate-500" />
-              <span>Parity line (value = cost)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span>X max: {formatCurrencyInt(xAxisMax)}</span>
-              <span>·</span>
-              <span>Y max: {formatCurrencyInt(yAxisMax)}</span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {personas.length === 2 && differenceData.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <TrendingUp className="h-5 w-5 text-primary" />
-              Difference in Perceived Value: {personas[0]} vs {personas[1]}
-            </CardTitle>
-            <CardDescription>Features where personas differ most in perceived value</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={differenceData.slice(0, 10)} margin={{ top: 20, right: 20, bottom: 20, left: 120 }}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis
-                    type="number"
-                    tickFormatter={(value) => formatCurrencyInt(Number(value))}
-                    label={{ value: `${personas[0]} minus ${personas[1]}`, position: "insideBottom", offset: -10 }}
-                  />
-                  <YAxis dataKey="feature" type="category" width={120} />
-                  <Tooltip formatter={(value) => [formatCurrencyInt(Number(value)), "Difference"]} />
-                  <Bar dataKey="difference">
-                    {differenceData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.difference > 0 ? "#0ea5e9" : "#ef4444"} />
+          {!hideMaterialCost ? (
+            <>
+              <div className="h-96 w-full rounded-md border bg-background/60 p-2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ScatterChart margin={{ top: 20, right: 30, bottom: 30, left: 20 }}>
+                    <CartesianGrid strokeDasharray="4 4" stroke="hsl(var(--border))" />
+                    <XAxis
+                      type="number"
+                      dataKey="materialCost"
+                      name="Material Cost"
+                      domain={[0, xAxisMax]}
+                      tick={{ fontSize: 12 }}
+                      tickFormatter={(value) => formatCurrencyInt(Number(value))}
+                      label={{ value: "Feature material cost", position: "insideBottom", offset: -10 }}
+                    />
+                    <YAxis
+                      type="number"
+                      dataKey="perceivedValue"
+                      name="Perceived Value"
+                      domain={[0, yAxisMax]}
+                      tick={{ fontSize: 12 }}
+                      tickFormatter={(value) => formatCurrencyInt(Number(value))}
+                      label={{ value: "Perceived customer value", angle: -90, position: "insideLeft" }}
+                    />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Legend verticalAlign="top" align="right" wrapperStyle={{ fontSize: "12px" }} />
+                    <ReferenceLine
+                      segment={[
+                        { x: 0, y: 0 },
+                        { x: parityMaxX, y: parityMaxX * paritySlope },
+                      ]}
+                      stroke="#64748b"
+                      strokeDasharray="5 5"
+                    />
+                    {personas.map((persona, index) => (
+                      <Scatter
+                        key={persona}
+                        data={byPersona.get(persona) ?? []}
+                        name={persona}
+                        fill={PERSONA_COLORS[index % PERSONA_COLORS.length]}
+                        stroke={PERSONA_COLORS[index % PERSONA_COLORS.length]}
+                        fillOpacity={0.82}
+                        strokeWidth={1.5}
+                      />
                     ))}
-                  </Bar>
+                  </ScatterChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="mt-4 rounded-md border bg-background/70 p-3">
+                <div className="mb-2 flex items-center justify-between gap-4 text-sm">
+                  <span className="font-medium">Parity line: {parityPercent[0]}%</span>
+                  <span className="text-muted-foreground">100% means value = cost</span>
+                </div>
+                <Slider
+                  min={40}
+                  max={200}
+                  step={5}
+                  value={parityPercent}
+                  onValueChange={setParityPercent}
+                  aria-label="Parity line percentage"
+                />
+              </div>
+            </>
+          ) : (
+            <div className="w-full rounded-md border bg-background/60 p-2" style={{ height: `${valueOnlyBarLayout.chartHeight}px` }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={valueOnlyData}
+                  layout="vertical"
+                  margin={{ top: 20, right: 30, bottom: 20, left: valueOnlyAxisLayout.leftMargin }}
+                  barCategoryGap={valueOnlyBarLayout.barCategoryGap}
+                  barGap={valueOnlyBarLayout.barGap}
+                >
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis type="number" tickFormatter={(value) => formatCurrencyInt(Number(value))} />
+                  <YAxis
+                    dataKey="featureName"
+                    type="category"
+                    width={valueOnlyAxisLayout.axisWidth}
+                    tick={{ fontSize: valueOnlyAxisLayout.fontSize }}
+                    interval={0}
+                  />
+                  <Tooltip formatter={(value) => formatCurrencyInt(Number(value))} />
+                  <Legend />
+                  {valueOnlySeries.map((series, index) => (
+                    <Bar
+                      key={series.key}
+                      dataKey={series.key}
+                      name={series.persona}
+                      fill={PERSONA_COLORS[index % PERSONA_COLORS.length]}
+                      barSize={valueOnlyBarLayout.barSize}
+                      radius={[0, 6, 6, 0]}
+                      minPointSize={2}
+                    />
+                  ))}
                 </BarChart>
               </ResponsiveContainer>
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {personas.length > 1 && (
+        <Card>
+          <CardHeader>
+            <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5 text-primary" />
+                  Difference in Perceived Value: {personaA || "Persona A"} - {personaB || "Persona B"}
+                </CardTitle>
+                <CardDescription>Features where selected personas differ most in perceived value</CardDescription>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <p className="text-xs font-medium text-muted-foreground">Persona A</p>
+                  <Select value={personaA} onValueChange={setPersonaA}>
+                    <SelectTrigger className="w-[210px]">
+                      <SelectValue placeholder="Select persona A" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {personas.map((persona) => (
+                        <SelectItem key={persona} value={persona}>
+                          {persona}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs font-medium text-muted-foreground">Persona B</p>
+                  <Select value={personaB} onValueChange={setPersonaB}>
+                    <SelectTrigger className="w-[210px]">
+                      <SelectValue placeholder="Select persona B" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {personas.map((persona) => (
+                        <SelectItem key={persona} value={persona}>
+                          {persona}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {personaA === personaB ? (
+              <p className="text-sm text-muted-foreground">Select two different personas to compare.</p>
+            ) : differenceData.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No overlapping features to compare for these personas.</p>
+            ) : (
+              <div className="w-full" style={{ height: `${comparisonBarLayout.chartHeight}px` }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={differenceChartRows}
+                    margin={{ top: 20, right: 20, bottom: 20, left: comparisonAxisLayout.leftMargin }}
+                    barCategoryGap={comparisonBarLayout.barCategoryGap}
+                    barGap={comparisonBarLayout.barGap}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis
+                      type="number"
+                      tickFormatter={(value) => formatCurrencyInt(Number(value))}
+                      label={{ value: `${personaA} minus ${personaB}`, position: "insideBottom", offset: -10 }}
+                    />
+                    <YAxis
+                      dataKey="feature"
+                      type="category"
+                      width={comparisonAxisLayout.axisWidth}
+                      tick={{ fontSize: comparisonAxisLayout.fontSize }}
+                      interval={0}
+                    />
+                    <Tooltip formatter={(_, __, item) => [formatCurrencyInt(Number(item?.payload?.difference ?? 0)), "Difference"]} />
+                    <Bar dataKey="renderDifference" minPointSize={3} barSize={comparisonBarLayout.barSize}>
+                      {differenceChartRows.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.difference > 0 ? "#0ea5e9" : "#ef4444"} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

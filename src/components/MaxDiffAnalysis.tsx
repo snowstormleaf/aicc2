@@ -1,8 +1,21 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Brain, CheckCircle, AlertCircle, SlidersHorizontal, Users, Car, ListChecks, Cpu, Ticket, ReceiptText } from "lucide-react";
+import {
+  Brain,
+  CheckCircle,
+  AlertCircle,
+  SlidersHorizontal,
+  Users,
+  Car,
+  ListChecks,
+  Cpu,
+  Ticket,
+  ReceiptText,
+  TerminalSquare,
+} from "lucide-react";
 import { MaxDiffEngine, PerceivedValue, RawResponse } from "@/lib/maxdiff-engine";
 import { buildSystemPrompt, buildUserPrompt, LLMClient } from "@/lib/llm-client";
 import { usePersonas } from "@/personas/store";
@@ -18,6 +31,14 @@ import {
   getStoredAnalysisSettings,
   type AnalysisSettings,
 } from "@/lib/analysis-settings";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 
 interface Feature {
   id: string;
@@ -34,7 +55,23 @@ interface MaxDiffAnalysisProps {
   onEditAnalysisParameters?: () => void;
 }
 
+type LiveCallCard = MaxDiffCallLog & {
+  phase: 'active' | 'fading';
+};
+
 const estimateTokens = (text: string) => Math.ceil(text.length / 4);
+
+const stringifyPayload = (value: unknown, maxChars = 12_000): string => {
+  try {
+    const json = JSON.stringify(value, null, 2);
+    if (json.length <= maxChars) return json;
+    return `${json.slice(0, maxChars)}\n...truncated`;
+  } catch {
+    return String(value);
+  }
+};
+
+const formatClock = (seconds: number) => `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 
 const buildEngineFeatures = (items: Feature[]) => {
   const seenIds = new Set<string>();
@@ -95,7 +132,12 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
   const [useCache, setUseCache] = useState(() => getStoredAnalysisSettings().defaultUseCache);
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
   const [serviceTier, setServiceTier] = useState(DEFAULT_SERVICE_TIER);
+  const [apiCallLogs, setApiCallLogs] = useState<MaxDiffCallLog[]>([]);
+  const [liveCallCards, setLiveCallCards] = useState<LiveCallCard[]>([]);
+  const [isApiConsoleOpen, setIsApiConsoleOpen] = useState(false);
   const { toast } = useToast();
+
+  const liveCardTimersRef = useRef<number[]>([]);
 
   const { personasById, getPersonaName } = usePersonas();
   const { vehiclesById } = useVehicles();
@@ -110,6 +152,32 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
     [engineFeatures, voucherPolicyBounds]
   );
   const totalSets = estimatedPlan.maxDiffSets.length;
+
+  const clearLiveCardTimers = () => {
+    liveCardTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+    liveCardTimersRef.current = [];
+  };
+
+  const enqueueLiveCall = (entry: MaxDiffCallLog) => {
+    setLiveCallCards((previous) => {
+      const fresh: LiveCallCard = { ...entry, phase: 'active' };
+      if (previous.length < 3) {
+        return [...previous, fresh];
+      }
+
+      const [oldest, ...rest] = previous;
+      const fadedOldest: LiveCallCard = { ...oldest, phase: 'fading' };
+      const next = [fadedOldest, ...rest, fresh];
+      const staleId = oldest.id;
+
+      const timerId = window.setTimeout(() => {
+        setLiveCallCards((current) => current.filter((item) => item.id !== staleId));
+      }, 700);
+      liveCardTimersRef.current.push(timerId);
+
+      return next;
+    });
+  };
 
   useEffect(() => {
     const storedKey = localStorage.getItem('openai_api_key');
@@ -143,6 +211,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
       window.removeEventListener(ANALYSIS_SETTINGS_UPDATED_EVENT, updateAnalysisSettings);
       window.removeEventListener('storage', updateModelConfig);
       window.removeEventListener('storage', updateAnalysisSettings);
+      clearLiveCardTimers();
     };
   }, []);
 
@@ -243,6 +312,10 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
     setCurrentSet(0);
     setElapsedTime(0);
     setEta(0);
+    setApiCallLogs([]);
+    setLiveCallCards([]);
+    clearLiveCardTimers();
+
     if (!analysisSettings.showProgressUpdates) {
       setAnalysisStatus('Running analysis...');
     }
@@ -308,6 +381,19 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
       const callLogs: MaxDiffCallLog[] = [];
       const results = new Map<string, PerceivedValue[]>();
 
+      const upsertCallLog = (entry: MaxDiffCallLog, addToLiveWindow = false) => {
+        const existingIndex = callLogs.findIndex((item) => item.id === entry.id);
+        if (existingIndex >= 0) {
+          callLogs[existingIndex] = entry;
+        } else {
+          callLogs.push(entry);
+        }
+        setApiCallLogs([...callLogs]);
+        if (addToLiveWindow) {
+          enqueueLiveCall(entry);
+        }
+      };
+
       const llmClient = new LLMClient({
         apiKey,
         model: storedModelConfig.model,
@@ -353,7 +439,8 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
       };
 
       for (const personaId of selectedPersonas) {
-        setCurrentPersona(getPersonaName(personaId));
+        const personaName = getPersonaName(personaId);
+        setCurrentPersona(personaName);
 
         const persona = personasById[personaId];
         if (!persona) {
@@ -361,7 +448,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         }
 
         if (analysisSettings.showProgressUpdates) {
-          setAnalysisStatus(`Starting analysis for ${personaId}...`);
+          setAnalysisStatus(`Starting analysis for ${personaName}...`);
         }
         const responses: RawResponse[] = [];
 
@@ -369,12 +456,39 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
           const maxDiffSet = analysisPlan.maxDiffSets[index];
           setCurrentSet(index + 1);
           if (analysisSettings.showProgressUpdates) {
-            setAnalysisStatus(`${personaId}: Analyzing set ${index + 1}/${analysisPlan.maxDiffSets.length}`);
+            setAnalysisStatus(`${personaName}: Analyzing set ${index + 1}/${analysisPlan.maxDiffSets.length}`);
           }
 
           const timestamp = new Date().toISOString();
           const displayedFeatures = maxDiffSet.options.map((option) => option.name);
           const optionNameById = new Map(maxDiffSet.options.map((option) => [option.id, option.name]));
+          const callId = `${personaId}-${maxDiffSet.id}-${index + 1}-${Date.now()}`;
+
+          const requestPreview = {
+            endpoint: 'POST /v1/responses',
+            persona: personaName,
+            setId: maxDiffSet.id,
+            vehicle: vehicleForAnalysis,
+            options: maxDiffSet.options.map((option) => ({
+              id: option.id,
+              name: option.name,
+            })),
+          };
+
+          const pendingLog: MaxDiffCallLog = {
+            id: callId,
+            timestamp,
+            personaId,
+            personaName,
+            setId: maxDiffSet.id,
+            displayedFeatures,
+            mostValued: 'Pending...',
+            leastValued: 'Pending...',
+            status: 'pending',
+            request: stringifyPayload(requestPreview),
+            response: '',
+          };
+          upsertCallLog(pendingLog);
 
           activeCallStartedAt = Date.now();
           updateTiming();
@@ -384,18 +498,30 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
             response = await llmClient.rankOptions(maxDiffSet, persona, vehicleForAnalysis, analysisPlan.featureDescMap);
           } catch (error) {
             const reason = error instanceof Error ? error.message : String(error);
+            const failedLog: MaxDiffCallLog = {
+              ...pendingLog,
+              status: 'error',
+              mostValued: '—',
+              leastValued: '—',
+              error: reason,
+              response: reason,
+            };
+            upsertCallLog(failedLog, true);
             throw new Error(
-              `Failed on persona "${getPersonaName(personaId)}" set ${index + 1}/${analysisPlan.maxDiffSets.length}: ${reason}`
+              `Failed on persona "${personaName}" set ${index + 1}/${analysisPlan.maxDiffSets.length}: ${reason}`
             );
           }
 
           responses.push(response);
-          callLogs.push({
-            timestamp,
-            displayedFeatures,
+          const successLog: MaxDiffCallLog = {
+            ...pendingLog,
             mostValued: optionNameById.get(response.mostValued) ?? response.mostValued,
             leastValued: optionNameById.get(response.leastValued) ?? response.leastValued,
-          });
+            status: 'success',
+            request: stringifyPayload(response.debugTrace?.request ?? requestPreview),
+            response: stringifyPayload(response.debugTrace?.response ?? response),
+          };
+          upsertCallLog(successLog, true);
 
           if (activeCallStartedAt) {
             totalCompletedCallSeconds += Math.max(0.1, (Date.now() - activeCallStartedAt) / 1000);
@@ -414,7 +540,8 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
           analysisPlan.vouchers
         );
 
-        results.set(personaId, perceivedValues);
+        const resultKey = results.has(personaName) ? `${personaName} (${personaId})` : personaName;
+        results.set(resultKey, perceivedValues);
 
         const cacheKey = cacheKeyByPersona.get(personaId);
         if (analysisSettings.persistResults && cacheKey) {
@@ -422,7 +549,8 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         }
       }
 
-      onAnalysisComplete(results, callLogs);
+      const summarizedCallLogs = callLogs.map(({ request, response, ...log }) => log);
+      onAnalysisComplete(results, summarizedCallLogs);
       setAnalysisStatus('Analysis complete!');
       setProgress(100);
     } catch (error) {
@@ -585,15 +713,27 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
       ) : (
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Brain className="h-5 w-5 animate-pulse text-primary" />
-              Analysis in Progress
-            </CardTitle>
-            <CardDescription>
-              {analysisSettings.showProgressUpdates
-                ? 'AI persona is evaluating feature sets...'
-                : 'Analysis is running with compact progress updates.'}
-            </CardDescription>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Brain className="h-5 w-5 animate-pulse text-primary" />
+                  Analysis in Progress
+                </CardTitle>
+                <CardDescription>
+                  {analysisSettings.showProgressUpdates
+                    ? 'AI persona is evaluating feature sets...'
+                    : 'Analysis is running with compact progress updates.'}
+                </CardDescription>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsApiConsoleOpen(true)}
+              >
+                <TerminalSquare className="mr-2 h-4 w-4" />
+                View more
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
@@ -617,10 +757,46 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
               <p className="text-sm text-muted-foreground">{analysisStatus}</p>
             </div>
 
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium">Live API calls (last 3)</p>
+                <p className="text-xs text-muted-foreground">Newest call appears at the bottom</p>
+              </div>
+              <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
+                {liveCallCards.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">Waiting for the first response…</p>
+                ) : (
+                  liveCallCards.map((call) => (
+                    <div
+                      key={call.id}
+                      className={cn(
+                        'analysis-live-card rounded-md border bg-card/90 p-3 shadow-sm',
+                        call.phase === 'fading' && 'analysis-live-card-fade',
+                        call.status === 'error' && 'border-destructive/40 bg-destructive/5',
+                      )}
+                    >
+                      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+                        <Badge variant="outline">{call.personaName ?? call.personaId ?? 'Persona'}</Badge>
+                        <Badge variant="secondary">{call.setId ?? 'Set'}</Badge>
+                        <Badge variant={call.status === 'error' ? 'destructive' : 'outline'}>
+                          {(call.status ?? 'success').toUpperCase()}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">Features: {call.displayedFeatures.join(' · ')}</p>
+                      <p className="text-xs mt-1">
+                        Most: <span className="font-medium text-data-positive">{call.mostValued}</span>
+                        {' · '}
+                        Least: <span className="font-medium text-data-negative">{call.leastValued}</span>
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
             {analysisSettings.showProgressUpdates && (
               <div className="text-center text-xs text-muted-foreground">
-                ⏱ Elapsed: <strong>{Math.floor(elapsedTime / 60)}m {elapsedTime % 60}s</strong> ·
-                ETA: <strong>{Math.floor(eta / 60)}m {eta % 60}s</strong>
+                ⏱ Elapsed: <strong>{formatClock(elapsedTime)}</strong> · ETA: <strong>{formatClock(eta)}</strong>
               </div>
             )}
 
@@ -633,6 +809,38 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
           </CardContent>
         </Card>
       )}
+
+      <Dialog open={isApiConsoleOpen} onOpenChange={setIsApiConsoleOpen}>
+        <DialogContent className="max-h-[90vh] max-w-5xl overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>Live API Console</DialogTitle>
+            <DialogDescription>
+              Real-time request and response log, styled as command prompt output.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="h-[65vh] overflow-y-auto rounded-md border border-emerald-500/30 bg-[#08110d] p-3 font-mono text-xs text-emerald-200">
+            {apiCallLogs.length === 0 ? (
+              <p className="text-emerald-300/70">$ waiting for API calls...</p>
+            ) : (
+              <div className="space-y-4">
+                {apiCallLogs.map((call) => (
+                  <div key={call.id} className="rounded border border-emerald-500/20 bg-black/25 p-3">
+                    <p className="text-emerald-300">
+                      $ POST /v1/responses --persona "{call.personaName ?? call.personaId ?? 'unknown'}" --set "{call.setId ?? 'n/a'}"
+                    </p>
+                    <p className="mt-2 text-emerald-400/80">&gt; request</p>
+                    <pre className="whitespace-pre-wrap break-words text-emerald-100/90">{call.request ?? '// waiting request payload...'}</pre>
+                    <p className="mt-2 text-emerald-400/80">&gt; response [{call.status ?? 'success'}]</p>
+                    <pre className="whitespace-pre-wrap break-words text-emerald-100/90">
+                      {call.response || (call.status === 'pending' ? '// waiting response...' : '// no response captured')}
+                    </pre>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

@@ -8,6 +8,7 @@ export interface AnalysisSettings {
   persistResults: boolean;
   defaultUseCache: boolean;
   showProgressUpdates: boolean;
+  hideMaterialCost: boolean;
 }
 
 export const DEFAULT_ANALYSIS_SETTINGS: AnalysisSettings = {
@@ -17,6 +18,7 @@ export const DEFAULT_ANALYSIS_SETTINGS: AnalysisSettings = {
   persistResults: true,
   defaultUseCache: false,
   showProgressUpdates: true,
+  hideMaterialCost: false,
 };
 
 const clamp = (value: number, min: number, max: number) =>
@@ -30,6 +32,7 @@ const normalizeSettings = (candidate: Partial<AnalysisSettings>): AnalysisSettin
   persistResults: candidate.persistResults ?? DEFAULT_ANALYSIS_SETTINGS.persistResults,
   defaultUseCache: candidate.defaultUseCache ?? DEFAULT_ANALYSIS_SETTINGS.defaultUseCache,
   showProgressUpdates: candidate.showProgressUpdates ?? DEFAULT_ANALYSIS_SETTINGS.showProgressUpdates,
+  hideMaterialCost: candidate.hideMaterialCost ?? DEFAULT_ANALYSIS_SETTINGS.hideMaterialCost,
 });
 
 export const getStoredAnalysisSettings = (): AnalysisSettings => {

@@ -346,22 +346,24 @@ export class LLMClient {
     let lastError: unknown = null;
     for (let attempt = 1; attempt <= this.config.maxRetries!; attempt++) {
       try {
+        const requestPayload: Record<string, unknown> = {
+          model,
+          instructions: systemPrompt,
+          input: userPrompt,
+          tools: [RANK_VALUE_TOOL],
+          tool_choice: { type: 'function', name: 'rank_value' },
+          max_output_tokens: tokenCap,
+          ...(serviceTier ? { service_tier: serviceTier } : {}),
+          ...(temperature != null ? { temperature } : {}),
+        };
+
         const response = await fetch('https://api.openai.com/v1/responses', {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${this.config.apiKey}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            model,
-            instructions: systemPrompt,
-            input: userPrompt,
-            tools: [RANK_VALUE_TOOL],
-            tool_choice: { type: 'function', name: 'rank_value' },
-            max_output_tokens: tokenCap,
-            ...(serviceTier ? { service_tier: serviceTier } : {}),
-            ...(temperature != null ? { temperature } : {})
-          })
+          body: JSON.stringify(requestPayload),
         });
 
         if (!response.ok) {
@@ -385,7 +387,11 @@ export class LLMClient {
           personaId: persona.id,
           mostValued: parsed.mostValued,
           leastValued: parsed.leastValued,
-          ranking: parsed.ranking || []
+          ranking: parsed.ranking || [],
+          debugTrace: {
+            request: requestPayload,
+            response: data as Record<string, unknown>,
+          },
         };
       } catch (error) {
         lastError = error;

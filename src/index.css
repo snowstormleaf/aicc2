@@ -119,3 +119,37 @@ All colors MUST be HSL.
     @apply bg-background text-foreground;
   }
 }
+
+@keyframes analysis-call-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes analysis-call-fade {
+  0% {
+    opacity: 0.55;
+    filter: grayscale(0.15);
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    filter: grayscale(1);
+    transform: scale(0.97);
+  }
+}
+
+@layer utilities {
+  .analysis-live-card {
+    animation: analysis-call-pop 240ms ease-out;
+  }
+
+  .analysis-live-card-fade {
+    animation: analysis-call-fade 700ms ease forwards;
+  }
+}

@@ -28,6 +28,10 @@ export interface RawResponse {
   mostValued: string;
   leastValued: string;
   ranking: string[]; // ids ordered from most to least
+  debugTrace?: {
+    request: Record<string, unknown>;
+    response: Record<string, unknown>;
+  };
 }
 
 export interface PerceivedValue {
