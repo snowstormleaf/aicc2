@@ -127,3 +127,16 @@ node server.js
 ```
 
 Then serve the built `dist/` folder with your preferred web server.
+
+
+## OpenAI configuration
+
+AI-powered generation and analysis now run through backend proxy endpoints. Set the key on the backend process instead of in the browser:
+
+```bash
+cd backend
+export OPENAI_API_KEY="sk-..."
+npm run dev
+```
+
+The frontend calls backend routes under `/api/llm/*`; no OpenAI key is stored in `localStorage`.

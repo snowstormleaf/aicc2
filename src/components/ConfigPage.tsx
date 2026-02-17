@@ -33,14 +33,12 @@ export const ConfigPage = ({ onClose }: ConfigPageProps) => {
   }, []);
 
   useEffect(() => {
-    setHasApiKey(!!localStorage.getItem('openai_api_key')?.trim());
     refreshSetupStatus();
   }, [refreshSetupStatus]);
 
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
-      if (!event.key || ['openai_api_key', 'openai_model', 'openai_service_tier', 'analysis_settings'].includes(event.key)) {
-        setHasApiKey(!!localStorage.getItem('openai_api_key')?.trim());
+      if (!event.key || ['openai_model', 'openai_service_tier', 'analysis_settings'].includes(event.key)) {
         refreshSetupStatus();
       }
     };
@@ -61,8 +59,7 @@ export const ConfigPage = ({ onClose }: ConfigPageProps) => {
     };
   }, [refreshSetupStatus]);
 
-  const handleApiKeySet = (apiKey: string) => {
-    const isPresent = Boolean(apiKey?.trim());
+  const handleApiKeySet = (isPresent: boolean) => {
     setHasApiKey(isPresent);
     refreshSetupStatus();
   };
@@ -70,8 +67,8 @@ export const ConfigPage = ({ onClose }: ConfigPageProps) => {
   const configSections = [
     {
       id: 'api',
-      title: 'OpenAI API Configuration',
-      description: 'Set up your OpenAI API key for AI persona analysis',
+      title: 'OpenAI Server Configuration',
+      description: 'Verify backend OPENAI_API_KEY for AI persona analysis',
       icon: Key,
       status: hasApiKey ? 'configured' : 'required',
       component: <ApiKeyInput onApiKeySet={handleApiKeySet} hasApiKey={hasApiKey} />,

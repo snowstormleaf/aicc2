@@ -6,6 +6,7 @@ import { PersonaApiRepository } from '@/infrastructure/api/repositories/personaR
 export interface PersonasStore {
   personas: CustomerPersona[];
   personasById: Record<string, CustomerPersona>;
+  seedPersonasById: Record<string, CustomerPersona>;
   seedIds: Set<string>;
   isLoading: boolean;
 
@@ -14,7 +15,7 @@ export interface PersonasStore {
   loadPersonas: () => Promise<void>;
   upsertPersona: (persona: CustomerPersona) => Promise<void>;
   deletePersona: (id: string) => Promise<void>;
-  resetPersonaToSeed: (id: string) => void;
+  resetPersonaToSeed: (id: string) => Promise<void>;
   getPersonaName: (id: string) => string;
 }
 
@@ -23,12 +24,14 @@ const personaRepository = new PersonaApiRepository();
 export const usePersonasStore = create<PersonasStore>((set, get) => ({
   personas: [],
   personasById: {},
+  seedPersonasById: {},
   seedIds: new Set(),
   isLoading: false,
 
   initializePersonas: (seedPersonas: Record<string, CustomerPersona>) => {
     set({
       personasById: seedPersonas,
+      seedPersonasById: seedPersonas,
       seedIds: new Set(Object.keys(seedPersonas)),
       personas: Object.values(seedPersonas).sort((a, b) => a.name.localeCompare(b.name)),
     });
@@ -71,9 +74,10 @@ export const usePersonasStore = create<PersonasStore>((set, get) => ({
     });
 
     try {
-      await personaRepository.syncBatch(Object.values(updated));
+      await personaRepository.save(normalized);
     } catch (error) {
-      console.error('Failed to sync personas:', error);
+      console.error('Failed to save persona:', error);
+      throw error;
     }
   },
 
@@ -94,13 +98,32 @@ export const usePersonasStore = create<PersonasStore>((set, get) => ({
       await personaRepository.delete(id);
     } catch (error) {
       console.error('Failed to delete persona:', error);
+      throw error;
     }
   },
 
-  resetPersonaToSeed: (id: string) => {
+  resetPersonaToSeed: async (id: string) => {
     const state = get();
     if (!state.seedIds.has(id)) return;
-    get().deletePersona(id);
+
+    const seedPersona = state.seedPersonasById[id];
+    if (!seedPersona) return;
+
+    const normalized = normalizePersona(seedPersona, 'seed');
+    const updated = { ...state.personasById, [id]: normalized };
+    const personasList = Object.values(updated).sort((a, b) => a.name.localeCompare(b.name));
+
+    set({
+      personasById: updated,
+      personas: personasList,
+    });
+
+    try {
+      await personaRepository.save(normalized);
+    } catch (error) {
+      console.error('Failed to reset persona to seed:', error);
+      throw error;
+    }
   },
 
   getPersonaName: (id: string) => {
