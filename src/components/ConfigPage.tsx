@@ -59,16 +59,15 @@ export const ConfigPage = ({ onClose }: ConfigPageProps) => {
     };
   }, [refreshSetupStatus]);
 
-  const handleApiKeySet = (isPresent: boolean) => {
-    setHasApiKey(isPresent);
-    refreshSetupStatus();
-  };
+  const handleApiKeySet = useCallback((isPresent: boolean) => {
+    setHasApiKey((current) => (current === isPresent ? current : isPresent));
+  }, []);
 
   const configSections = [
     {
       id: 'api',
       title: 'OpenAI Server Configuration',
-      description: 'Verify backend OPENAI_API_KEY for AI persona analysis',
+      description: 'Backend key status',
       icon: Key,
       status: hasApiKey ? 'configured' : 'required',
       component: <ApiKeyInput onApiKeySet={handleApiKeySet} hasApiKey={hasApiKey} />,
@@ -199,7 +198,7 @@ export const ConfigPage = ({ onClose }: ConfigPageProps) => {
                   </div>
                   <Badge
                     variant="outline"
-                    className={`text-xs ${
+                    className={`min-w-28 justify-center text-center text-xs ${
                       section.status === 'configured'
                         ? 'bg-data-positive/10 text-data-positive border-data-positive/20'
                         : section.status === 'required'
@@ -219,11 +218,9 @@ export const ConfigPage = ({ onClose }: ConfigPageProps) => {
         );
       })}
 
-      {onClose && (
+      {onClose && isReadyForAnalysis && (
         <div className="flex justify-end pt-4">
-          <Button onClick={onClose} variant="analytics" disabled={!isReadyForAnalysis}>
-            {isReadyForAnalysis ? 'Start Analysis' : 'Resolve Setup Issues First'}
-          </Button>
+          <Button onClick={onClose} variant="analytics">Start Analysis</Button>
         </div>
       )}
     </div>
