@@ -65,6 +65,8 @@ export const usePersonasStore = create<PersonasStore>((set, get) => ({
   upsertPersona: async (persona: CustomerPersona) => {
     const normalized = normalizePersona(persona, persona.meta?.source ?? 'manual');
     const state = get();
+    const previousById = state.personasById;
+    const previousPersonas = state.personas;
     const updated = { ...state.personasById, [normalized.id]: normalized };
     const personasList = Object.values(updated).sort((a, b) => a.name.localeCompare(b.name));
 
@@ -77,6 +79,10 @@ export const usePersonasStore = create<PersonasStore>((set, get) => ({
       await personaRepository.save(normalized);
     } catch (error) {
       console.error('Failed to save persona:', error);
+      set({
+        personasById: previousById,
+        personas: previousPersonas,
+      });
       throw error;
     }
   },
@@ -85,6 +91,8 @@ export const usePersonasStore = create<PersonasStore>((set, get) => ({
     const state = get();
     if (!(id in state.personasById)) return;
 
+    const previousById = state.personasById;
+    const previousPersonas = state.personas;
     const updated = { ...state.personasById };
     delete updated[id];
     const personasList = Object.values(updated).sort((a, b) => a.name.localeCompare(b.name));
@@ -98,6 +106,10 @@ export const usePersonasStore = create<PersonasStore>((set, get) => ({
       await personaRepository.delete(id);
     } catch (error) {
       console.error('Failed to delete persona:', error);
+      set({
+        personasById: previousById,
+        personas: previousPersonas,
+      });
       throw error;
     }
   },
@@ -110,6 +122,8 @@ export const usePersonasStore = create<PersonasStore>((set, get) => ({
     if (!seedPersona) return;
 
     const normalized = normalizePersona(seedPersona, 'seed');
+    const previousById = state.personasById;
+    const previousPersonas = state.personas;
     const updated = { ...state.personasById, [id]: normalized };
     const personasList = Object.values(updated).sort((a, b) => a.name.localeCompare(b.name));
 
@@ -122,6 +136,10 @@ export const usePersonasStore = create<PersonasStore>((set, get) => ({
       await personaRepository.save(normalized);
     } catch (error) {
       console.error('Failed to reset persona to seed:', error);
+      set({
+        personasById: previousById,
+        personas: previousPersonas,
+      });
       throw error;
     }
   },

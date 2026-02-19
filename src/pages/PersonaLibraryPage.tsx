@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { PersonaLibrary } from "@/components/PersonaLibrary";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import bgPersonaLibrary from "@/data/bg_persona-library.jpg";
 
 const PersonaLibraryPage = () => {
   return (
@@ -28,7 +29,7 @@ const PersonaLibraryPage = () => {
             className="h-32 border-b border-border-subtle bg-cover bg-center"
             style={{
               backgroundImage:
-                "linear-gradient(to right, rgba(248, 252, 249, 0.6), rgba(248, 252, 249, 0.45)), url('/persona-management-banner.svg')",
+                `linear-gradient(to right, rgba(248, 252, 249, 0.6), rgba(248, 252, 249, 0.45)), url('${bgPersonaLibrary}')`,
             }}
             aria-hidden="true"
           />

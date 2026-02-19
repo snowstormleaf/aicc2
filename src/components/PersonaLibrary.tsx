@@ -65,9 +65,8 @@ export function PersonaLibrary() {
         onOpenChange={setUpsertOpen}
         mode={editPersona ? "edit" : "create"}
         initial={editPersona}
-        onSave={(p) => {
-          upsertPersona(p);
-          setUpsertOpen(false);
+        onSave={async (p) => {
+          await upsertPersona(p);
           setEditPersona(null);
         }}
       />

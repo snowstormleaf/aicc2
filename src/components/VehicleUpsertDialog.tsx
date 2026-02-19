@@ -60,7 +60,7 @@ export function VehicleUpsertDialog(props: {
   mode: "create" | "edit";
   initial?: Vehicle | null;
 
-  onSave: (vehicle: Vehicle) => void;
+  onSave: (vehicle: Vehicle) => Promise<void> | void;
 }) {
   const { open, onOpenChange, mode, initial, onSave } = props;
 
@@ -78,6 +78,7 @@ export function VehicleUpsertDialog(props: {
 
   const [brief, setBrief] = React.useState("");
   const [aiBusy, setAiBusy] = React.useState(false);
+  const [saveBusy, setSaveBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -94,7 +95,7 @@ export function VehicleUpsertDialog(props: {
     setTags(defaults.tags);
   }, [open, initial]);
 
-  const handleSaveManual = () => {
+  const handleSaveManual = async () => {
     setError(null);
 
     const finalName = name.trim();
@@ -116,8 +117,15 @@ export function VehicleUpsertDialog(props: {
       updatedAt: new Date().toISOString(),
     };
 
-    onSave(vehicle);
-    onOpenChange(false);
+    setSaveBusy(true);
+    try {
+      await Promise.resolve(onSave(vehicle));
+      onOpenChange(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save vehicle.");
+    } finally {
+      setSaveBusy(false);
+    }
   };
 
   const handleAIGenerate = async () => {
@@ -151,7 +159,7 @@ export function VehicleUpsertDialog(props: {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {mode === "create" ? "Create Vehicle" : "Edit Vehicle"}
@@ -252,11 +260,11 @@ export function VehicleUpsertDialog(props: {
             </div>
 
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
+              <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saveBusy}>
                 Cancel
               </Button>
-              <Button onClick={handleSaveManual}>
-                {mode === "create" ? "Create" : "Save"}
+              <Button onClick={handleSaveManual} disabled={saveBusy}>
+                {saveBusy ? "Saving..." : mode === "create" ? "Create" : "Save"}
               </Button>
             </div>
           </TabsContent>

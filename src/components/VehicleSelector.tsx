@@ -84,6 +84,15 @@ export const VehicleSelector = ({ selectedVehicle, onSelectVehicle }: VehicleSel
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         {filteredVehicles.map((vehicle) => {
           const isSelected = selectedVehicle === vehicle.id;
+          const brandLabel = (vehicle.brand ?? vehicle.manufacturer ?? "").trim();
+          const manufacturerLabel = (vehicle.manufacturer ?? "Unknown").trim();
+          const subtitleLine = [
+            manufacturerLabel,
+            (vehicle.model ?? "").trim(),
+            vehicle.year != null ? String(vehicle.year) : "",
+          ]
+            .filter(Boolean)
+            .join(" · ");
 
           return (
             <Card
@@ -99,15 +108,11 @@ export const VehicleSelector = ({ selectedVehicle, onSelectVehicle }: VehicleSel
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
                     <CardTitle className="text-lg truncate">{vehicle.name}</CardTitle>
-                    <p className="text-sm text-muted-foreground">
-                      {vehicle.manufacturer && `${vehicle.manufacturer}`}
-                      {vehicle.model && ` · ${vehicle.model}`}
-                      {vehicle.year && ` · ${vehicle.year}`}
-                    </p>
+                    <p className="text-sm text-muted-foreground">{subtitleLine}</p>
                   </div>
-                  {vehicle.manufacturer && (
+                  {brandLabel && (
                     <Badge variant="outline" className="text-xs shrink-0">
-                      {vehicle.manufacturer}
+                      {brandLabel}
                     </Badge>
                   )}
                 </div>
@@ -205,9 +210,9 @@ export const VehicleSelector = ({ selectedVehicle, onSelectVehicle }: VehicleSel
         onOpenChange={setEditOpen}
         mode="edit"
         initial={editVehicle}
-        onSave={(vehicle) => {
-          upsertVehicle(vehicle);
-          setEditOpen(false);
+        onSave={async (vehicle) => {
+          await upsertVehicle(vehicle);
+          setEditVehicle(null);
         }}
       />
     </div>

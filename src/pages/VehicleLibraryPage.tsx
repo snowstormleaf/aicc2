@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { VehicleLibrary } from "@/components/vehicles/VehicleLibrary";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import bgVehicleLibrary from "@/data/bg_vehicle-library.jpg";
 
 const VehicleLibraryPage = () => {
   return (
@@ -28,7 +29,7 @@ const VehicleLibraryPage = () => {
             className="h-32 border-b border-border-subtle bg-cover bg-center"
             style={{
               backgroundImage:
-                "linear-gradient(to right, rgba(247, 251, 248, 0.62), rgba(247, 251, 248, 0.5)), url('/vehicle-management-banner.svg')",
+                `linear-gradient(to right, rgba(247, 251, 248, 0.62), rgba(247, 251, 248, 0.5)), url('${bgVehicleLibrary}')`,
             }}
             aria-hidden="true"
           />

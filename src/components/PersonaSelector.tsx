@@ -199,9 +199,9 @@ export const PersonaSelector = ({ selectedPersonas, onPersonaSelect }: PersonaSe
         onOpenChange={setEditOpen}
         mode="edit"
         initial={editPersona}
-        onSave={(persona) => {
-          upsertPersona(persona);
-          setEditOpen(false);
+        onSave={async (persona) => {
+          await upsertPersona(persona);
+          setEditPersona(null);
         }}
       />
     </div>

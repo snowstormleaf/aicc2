@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, BarChart3, Car, CheckCircle2, Upload, Users } from "lucide-react";
 
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -11,6 +11,7 @@ import { PersonaSelector } from "@/components/PersonaSelector";
 import { VehicleSelector } from "@/components/VehicleSelector";
 import { PerceivedValue } from "@/lib/maxdiff-engine";
 import type { MaxDiffCallLog } from "@/types/analysis";
+import { useWorkspaceStore } from "@/store/workspaceStore";
 
 const FeatureUpload = lazy(() =>
   import("@/components/FeatureUpload").then((module) => ({ default: module.FeatureUpload }))
@@ -85,6 +86,8 @@ const Index = () => {
   const [callLogs, setCallLogs] = useState<MaxDiffCallLog[]>(persistedState?.callLogs ?? []);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [workspaceTab, setWorkspaceTab] = useState(persistedState?.workspaceTab ?? "config");
+  const appliedBrands = useWorkspaceStore((state) => state.appliedBrands);
+  const previousAppliedBrands = useRef<string | null>(null);
 
   useEffect(() => {
     const serializable: PersistedWorkflowState = {
@@ -98,6 +101,25 @@ const Index = () => {
     };
     sessionStorage.setItem(WORKFLOW_SESSION_STORAGE_KEY, JSON.stringify(serializable));
   }, [analysisResults, callLogs, currentStep, features, selectedPersonas, selectedVehicle, workspaceTab]);
+
+  useEffect(() => {
+    const serialized = JSON.stringify(appliedBrands);
+    if (previousAppliedBrands.current == null) {
+      previousAppliedBrands.current = serialized;
+      return;
+    }
+
+    if (serialized === previousAppliedBrands.current) {
+      return;
+    }
+
+    previousAppliedBrands.current = serialized;
+    setSelectedPersonas([]);
+    setSelectedVehicle(null);
+    setAnalysisResults(null);
+    setCallLogs([]);
+    setCurrentStep("persona");
+  }, [appliedBrands]);
 
   const steps = useMemo(
     () => [

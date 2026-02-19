@@ -60,9 +60,8 @@ export function VehicleLibrary() {
         onOpenChange={setUpsertOpen}
         mode={editVehicle ? "edit" : "create"}
         initial={editVehicle}
-        onSave={(v) => {
-          upsertVehicle(v);
-          setUpsertOpen(false);
+        onSave={async (v) => {
+          await upsertVehicle(v);
           setEditVehicle(null);
         }}
       />
