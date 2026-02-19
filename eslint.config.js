@@ -26,4 +26,15 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": "off",
     },
   }
+  ,
+  {
+    files: [
+      "src/components/ui/**/*.tsx",
+      "src/personas/store.tsx",
+      "src/vehicles/store.tsx",
+    ],
+    rules: {
+      "react-refresh/only-export-components": "off",
+    },
+  }
 );

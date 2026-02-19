@@ -3,6 +3,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import {
   Brain,
   CheckCircle,
@@ -16,7 +18,7 @@ import {
   ReceiptText,
   TerminalSquare,
 } from "lucide-react";
-import { MaxDiffEngine, PerceivedValue, RawResponse } from "@/lib/maxdiff-engine";
+import { MaxDiffEngine, MaxDiffSet, PerceivedValue, RawResponse } from "@/lib/maxdiff-engine";
 import { buildSystemPrompt, buildUserPrompt, LLMClient } from "@/lib/llm-client";
 import { usePersonas } from "@/personas/store";
 import { useVehicles } from "@/vehicles/store";
@@ -72,6 +74,50 @@ const stringifyPayload = (value: unknown, maxChars = 12_000): string => {
 };
 
 const formatClock = (seconds: number) => `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const shuffle = <T,>(items: T[]) => {
+  const next = [...items];
+  for (let i = next.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [next[i], next[j]] = [next[j], next[i]];
+  }
+  return next;
+};
+
+const simulateRankOptions = async (
+  set: MaxDiffSet,
+  personaId: string,
+  requestPreview: Record<string, unknown>
+): Promise<RawResponse> => {
+  const optionIds = set.options.map((option) => option.id);
+  const ranking = shuffle(optionIds);
+  const mostValued = ranking[0] ?? optionIds[0] ?? "unknown";
+  const leastValued = ranking[ranking.length - 1] ?? optionIds[optionIds.length - 1] ?? "unknown";
+
+  await sleep(180 + Math.floor(Math.random() * 420));
+
+  return {
+    setId: set.id,
+    personaId,
+    mostValued,
+    leastValued,
+    ranking,
+    debugTrace: {
+      request: {
+        ...requestPreview,
+        mode: "simulated",
+      },
+      response: {
+        mode: "simulated",
+        ranking,
+        most_valued: mostValued,
+        least_valued: leastValued,
+      },
+    },
+  };
+};
 
 const buildEngineFeatures = (items: Feature[]) => {
   const seenIds = new Set<string>();
@@ -210,22 +256,25 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
     setHasApiKey(isPresent);
   };
 
+  const isSimulationMode = analysisSettings.simulateApiCalls;
+
   const costEstimate = useMemo(() => {
-    if (useCache) {
+    const totalCalls = selectedPersonas.length * estimatedPlan.maxDiffSets.length;
+
+    if (useCache || isSimulationMode) {
       return {
         totalCost: 0,
         inputCost: 0,
         outputCost: 0,
         inputTokens: 0,
         outputTokens: 0,
-        totalCalls: 0,
+        totalCalls,
       };
     }
 
     const vehicle = vehiclesById[selectedVehicle];
     if (!vehicle) return null;
 
-    const totalCalls = selectedPersonas.length * estimatedPlan.maxDiffSets.length;
     if (totalCalls === 0) return null;
 
     const sampleSet = estimatedPlan.maxDiffSets[0];
@@ -272,6 +321,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
     selectedPersonas,
     selectedVehicle,
     serviceTier,
+    isSimulationMode,
     useCache,
     vehiclesById,
   ]);
@@ -288,7 +338,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
   }
 
   const runAnalysis = async () => {
-    if (!hasApiKey && !useCache) {
+    if (!hasApiKey && !useCache && !isSimulationMode) {
       setAnalysisStatus('Server OpenAI key required');
       toast({
         title: "Server OpenAI key required",
@@ -308,7 +358,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
     clearLiveCardTimers();
 
     if (!analysisSettings.showProgressUpdates) {
-      setAnalysisStatus('Running analysis...');
+      setAnalysisStatus(isSimulationMode ? 'Running simulated analysis...' : 'Running analysis...');
     }
 
     const startTime = Date.now();
@@ -385,14 +435,16 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         }
       };
 
-      const llmClient = new LLMClient({
-        model: storedModelConfig.model,
-        reasoningModel: storedModelConfig.model,
-        serviceTier: storedModelConfig.serviceTier,
-        maxRetries: analysisSettings.maxRetries,
-        useGPT: true,
-        temperature: analysisSettings.temperature,
-      });
+      const llmClient = isSimulationMode
+        ? null
+        : new LLMClient({
+            model: storedModelConfig.model,
+            reasoningModel: storedModelConfig.model,
+            serviceTier: storedModelConfig.serviceTier,
+            maxRetries: analysisSettings.maxRetries,
+            useGPT: true,
+            temperature: analysisSettings.temperature,
+          });
 
       const voucherBounds = voucherPolicyBounds;
       const analysisPlan = buildAnalysisPlan(engineFeatures, voucherBounds);
@@ -438,7 +490,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         }
 
         if (analysisSettings.showProgressUpdates) {
-          setAnalysisStatus(`Starting analysis for ${personaName}...`);
+          setAnalysisStatus(`${isSimulationMode ? 'Starting simulation' : 'Starting analysis'} for ${personaName}...`);
         }
         const responses: RawResponse[] = [];
 
@@ -446,7 +498,9 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
           const maxDiffSet = analysisPlan.maxDiffSets[index];
           setCurrentSet(index + 1);
           if (analysisSettings.showProgressUpdates) {
-            setAnalysisStatus(`${personaName}: Analyzing set ${index + 1}/${analysisPlan.maxDiffSets.length}`);
+            setAnalysisStatus(
+              `${personaName}: ${isSimulationMode ? 'Simulating' : 'Analyzing'} set ${index + 1}/${analysisPlan.maxDiffSets.length}`
+            );
           }
 
           const timestamp = new Date().toISOString();
@@ -485,7 +539,9 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
 
           let response: RawResponse;
           try {
-            response = await llmClient.rankOptions(maxDiffSet, persona, vehicleForAnalysis, analysisPlan.featureDescMap);
+            response = isSimulationMode
+              ? await simulateRankOptions(maxDiffSet, persona.id, requestPreview)
+              : await llmClient!.rankOptions(maxDiffSet, persona, vehicleForAnalysis, analysisPlan.featureDescMap);
           } catch (error) {
             const reason = error instanceof Error ? error.message : String(error);
             const failedLog: MaxDiffCallLog = {
@@ -520,8 +576,10 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
           callsDone++;
           updateTiming();
 
-          // Small delay to avoid rate limiting
-          await new Promise((resolve) => setTimeout(resolve, 200));
+          if (!isSimulationMode) {
+            // Small delay to avoid rate limiting
+            await sleep(200);
+          }
         }
 
         const perceivedValues = MaxDiffEngine.computePerceivedValues(
@@ -565,12 +623,13 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
 
   return (
     <div className="space-y-6">
-      <div className="text-center">
-        <h2 className="text-2xl font-bold text-foreground mb-2">MaxDiff Tradeoff Analysis</h2>
-        <p className="text-muted-foreground">AI-powered persona simulation for feature valuation</p>
+      <div className="space-y-2 text-center">
+        <p className="type-caption">Step 4</p>
+        <h2 className="type-headline">MaxDiff Tradeoff Analysis</h2>
+        <p className="type-deck mx-auto content-measure">AI-powered persona simulation for feature valuation.</p>
       </div>
 
-      {!hasApiKey && !useCache && (
+      {!hasApiKey && !useCache && !isSimulationMode && (
         <Alert>
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>Server OpenAI key required</AlertTitle>
@@ -580,7 +639,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         </Alert>
       )}
 
-      <Card className="w-full">
+      <Card className="w-full" id="workspace-hub">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <CardTitle className="text-lg flex items-center gap-2">
@@ -602,7 +661,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         </CardHeader>
         <CardContent className="pt-0">
           <div className="grid w-full gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-            <div className="rounded-lg border bg-card/70 p-3 shadow-sm transition-colors hover:bg-muted/30">
+            <div className="rounded-lg border border-border-subtle bg-surface p-3 shadow-subtle transition-colors hover:bg-muted/35">
               <p className="mb-1 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 <Users className="h-3.5 w-3.5" />
                 Personas
@@ -614,7 +673,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
               </p>
             </div>
 
-            <div className="rounded-lg border bg-card/70 p-3 shadow-sm transition-colors hover:bg-muted/30">
+            <div className="rounded-lg border border-border-subtle bg-surface p-3 shadow-subtle transition-colors hover:bg-muted/35">
               <p className="mb-1 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 <Car className="h-3.5 w-3.5" />
                 Vehicle
@@ -622,7 +681,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
               <p className="truncate text-sm font-semibold">{vehiclesById[selectedVehicle]?.name ?? selectedVehicle}</p>
             </div>
 
-            <div className="rounded-lg border bg-card/70 p-3 shadow-sm transition-colors hover:bg-muted/30">
+            <div className="rounded-lg border border-border-subtle bg-surface p-3 shadow-subtle transition-colors hover:bg-muted/35">
               <p className="mb-1 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 <ListChecks className="h-3.5 w-3.5" />
                 Features
@@ -630,7 +689,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
               <p className="text-sm font-semibold">{features.length} loaded</p>
             </div>
 
-            <div className="rounded-lg border bg-card/70 p-3 shadow-sm transition-colors hover:bg-muted/30">
+            <div className="rounded-lg border border-border-subtle bg-surface p-3 shadow-subtle transition-colors hover:bg-muted/35">
               <p className="mb-1 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 <Cpu className="h-3.5 w-3.5" />
                 Model
@@ -639,7 +698,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
               <p className="text-xs text-muted-foreground">{serviceTier === 'flex' ? 'Flex tier' : 'Standard tier'}</p>
             </div>
 
-            <div className="rounded-lg border bg-card/70 p-3 shadow-sm transition-colors hover:bg-muted/30">
+            <div className="rounded-lg border border-border-subtle bg-surface p-3 shadow-subtle transition-colors hover:bg-muted/35">
               <p className="mb-1 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 <Ticket className="h-3.5 w-3.5" />
                 Vouchers
@@ -648,14 +707,19 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
               <p className="text-xs text-muted-foreground">Low ${voucherPolicyBounds.min_discount} · High ${voucherPolicyBounds.max_discount}</p>
             </div>
 
-            <div className="rounded-lg border bg-card/70 p-3 shadow-sm transition-colors hover:bg-muted/30">
+            <div className="rounded-lg border border-border-subtle bg-surface p-3 shadow-subtle transition-colors hover:bg-muted/35">
               <p className="mb-1 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 <ReceiptText className="h-3.5 w-3.5" />
                 Cost
               </p>
-              <p className="text-sm font-semibold">{costEstimate ? (useCache ? '$0.00' : formatPrice(costEstimate.totalCost)) : '—'}</p>
-              {costEstimate && !useCache && (
+              <p className="text-sm font-semibold">
+                {costEstimate ? (useCache || isSimulationMode ? '$0.00' : formatPrice(costEstimate.totalCost)) : '—'}
+              </p>
+              {costEstimate && !useCache && !isSimulationMode && (
                 <p className="text-xs text-muted-foreground">~{costEstimate.totalCalls} calls</p>
+              )}
+              {isSimulationMode && (
+                <p className="text-xs text-muted-foreground">Simulation mode</p>
               )}
               {useCache && (
                 <p className="text-xs text-muted-foreground">Cache enabled</p>
@@ -665,20 +729,18 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         </CardContent>
       </Card>
 
-      <div className="flex items-center space-x-2 justify-center">
-        <input
-          type="checkbox"
+      <div className="flex items-center justify-center space-x-2" id="design-hub">
+        <Checkbox
           id="useCache"
           checked={useCache}
-          onChange={(e) => setUseCache(e.target.checked)}
-          className="rounded border-gray-300"
+          onCheckedChange={(checked) => setUseCache(Boolean(checked))}
         />
-        <label htmlFor="useCache" className="text-sm text-muted-foreground">
+        <Label htmlFor="useCache" className="text-sm font-medium text-muted-foreground">
           Use cached results (skip AI analysis)
-        </label>
+        </Label>
       </div>
 
-      {!hasApiKey && !useCache ? (
+      {!hasApiKey && !useCache && !isSimulationMode ? (
         <ApiKeyInput onApiKeySet={handleApiKeySet} hasApiKey={hasApiKey} />
       ) : !isAnalyzing ? (
         <Card className="text-center">
@@ -688,7 +750,16 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
               Start the MaxDiff analysis with {totalSets} feature sets
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
+            {isSimulationMode && (
+              <Alert variant="destructive" className="text-left">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Simulation mode enabled</AlertTitle>
+                <AlertDescription>
+                  Results are randomized for UI/testing only. No real OpenAI API calls are made.
+                </AlertDescription>
+              </Alert>
+            )}
             <Button
               onClick={runAnalysis}
               size="lg"
@@ -696,7 +767,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
               className="px-8"
             >
               <Brain className="h-5 w-5 mr-2" />
-              Start MaxDiff Analysis
+              {isSimulationMode ? "Start Simulated Analysis" : "Start MaxDiff Analysis"}
             </Button>
           </CardContent>
         </Card>
@@ -711,8 +782,12 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                 </CardTitle>
                 <CardDescription>
                   {analysisSettings.showProgressUpdates
-                    ? 'AI persona is evaluating feature sets...'
-                    : 'Analysis is running with compact progress updates.'}
+                    ? isSimulationMode
+                      ? 'Simulated personas are evaluating randomized feature sets...'
+                      : 'AI persona is evaluating feature sets...'
+                    : isSimulationMode
+                      ? 'Simulation is running with compact progress updates.'
+                      : 'Analysis is running with compact progress updates.'}
                 </CardDescription>
               </div>
               <Button
@@ -747,12 +822,12 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
               <p className="text-sm text-muted-foreground">{analysisStatus}</p>
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-2" id="insights-console">
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium">Live API calls (last 3)</p>
                 <p className="text-xs text-muted-foreground">Newest call appears at the bottom</p>
               </div>
-              <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
+              <div className="space-y-2 rounded-lg border border-border-subtle bg-muted/20 p-3">
                 {liveCallCards.length === 0 ? (
                   <p className="text-xs text-muted-foreground">Waiting for the first response…</p>
                 ) : (
@@ -760,7 +835,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                     <div
                       key={call.id}
                       className={cn(
-                        'analysis-live-card rounded-md border bg-card/90 p-3 shadow-sm',
+                        'analysis-live-card rounded-md border border-border-subtle bg-card/90 p-3 shadow-subtle',
                         call.phase === 'fading' && 'analysis-live-card-fade',
                         call.status === 'error' && 'border-destructive/40 bg-destructive/5',
                       )}

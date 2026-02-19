@@ -9,6 +9,29 @@ export default defineConfig(({ mode }) => ({
     host: "::",
     port: 8080,
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules")) {
+            if (id.includes("/recharts/")) return "charts";
+            if (id.includes("/lucide-react/")) return "icons";
+            if (id.includes("/@radix-ui/")) return "radix";
+            return "vendor";
+          }
+
+          if (
+            id.includes("/src/domain/personas/seed.ts") ||
+            id.includes("/src/personas/store.tsx")
+          ) {
+            return "personas-data";
+          }
+
+          return undefined;
+        },
+      },
+    },
+  },
   plugins: [
     react(),
     mode === 'development' &&

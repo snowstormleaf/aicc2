@@ -42,11 +42,11 @@ export const ApiKeyInput = ({ onApiKeySet, hasApiKey }: ApiKeyInputProps) => {
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted-foreground text-center">{statusText}</p>
+      <p className="text-sm text-muted-foreground">{statusText}</p>
 
       {error && (
-        <Alert>
-          <AlertDescription className="text-xs text-destructive text-center">
+        <Alert variant="destructive">
+          <AlertDescription className="text-xs">
             {error} Restart the backend (`npm run dev:backend`) and verify `VITE_API_URL` points to that backend.
           </AlertDescription>
         </Alert>

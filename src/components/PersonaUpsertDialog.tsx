@@ -69,7 +69,7 @@ export function PersonaUpsertDialog(props: {
   mode: "create" | "edit";
   initial?: CustomerPersona | null;
 
-  onSave: (persona: CustomerPersona) => void;
+  onSave: (persona: CustomerPersona) => Promise<void> | void;
 }) {
   const { open, onOpenChange, mode, initial, onSave } = props;
 
@@ -107,6 +107,7 @@ export function PersonaUpsertDialog(props: {
 
   const [brief, setBrief] = React.useState("");
   const [aiBusy, setAiBusy] = React.useState(false);
+  const [saveBusy, setSaveBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -138,7 +139,7 @@ export function PersonaUpsertDialog(props: {
     setPreferredContent(defaults.preferredContent);
   }, [open, initial]);
 
-  const handleSaveManual = () => {
+  const handleSaveManual = async () => {
     setError(null);
 
     const finalName = name.trim();
@@ -187,8 +188,15 @@ export function PersonaUpsertDialog(props: {
       },
     };
 
-    onSave(persona);
-    onOpenChange(false);
+    setSaveBusy(true);
+    try {
+      await Promise.resolve(onSave(persona));
+      onOpenChange(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save persona.");
+    } finally {
+      setSaveBusy(false);
+    }
   };
 
   const handleGenerateFromAI = async () => {
@@ -385,11 +393,11 @@ export function PersonaUpsertDialog(props: {
             </div>
 
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
+              <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saveBusy}>
                 Cancel
               </Button>
-              <Button onClick={handleSaveManual}>
-                {mode === "create" ? "Create persona" : "Save changes"}
+              <Button onClick={handleSaveManual} disabled={saveBusy}>
+                {saveBusy ? "Saving..." : mode === "create" ? "Create persona" : "Save changes"}
               </Button>
             </div>
           </TabsContent>

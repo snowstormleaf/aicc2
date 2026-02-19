@@ -46,6 +46,8 @@ export const useVehiclesStore = create<VehiclesStore>((set, get) => ({
   upsertVehicle: async (vehicle: Vehicle) => {
     const normalized = normalizeVehicle(vehicle);
     const state = get();
+    const previousById = state.vehiclesById;
+    const previousVehicles = state.vehicles;
     const updated = { ...state.vehiclesById, [normalized.id]: normalized };
 
     set({
@@ -57,6 +59,11 @@ export const useVehiclesStore = create<VehiclesStore>((set, get) => ({
       await vehicleRepository.syncBatch(Object.values(updated));
     } catch (error) {
       console.error('Failed to sync vehicles:', error);
+      set({
+        vehiclesById: previousById,
+        vehicles: previousVehicles,
+      });
+      throw error;
     }
   },
 
@@ -64,6 +71,8 @@ export const useVehiclesStore = create<VehiclesStore>((set, get) => ({
     const state = get();
     if (!(id in state.vehiclesById)) return;
 
+    const previousById = state.vehiclesById;
+    const previousVehicles = state.vehicles;
     const updated = { ...state.vehiclesById };
     delete updated[id];
 
@@ -76,6 +85,11 @@ export const useVehiclesStore = create<VehiclesStore>((set, get) => ({
       await vehicleRepository.delete(id);
     } catch (error) {
       console.error('Failed to delete vehicle:', error);
+      set({
+        vehiclesById: previousById,
+        vehicles: previousVehicles,
+      });
+      throw error;
     }
   },
 

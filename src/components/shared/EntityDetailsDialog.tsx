@@ -71,13 +71,13 @@ export function EntityDetailsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="grid max-h-[85vh] max-w-2xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center justify-between gap-3">
             <span className="truncate">{displayTitle}</span>
             {onToggleSelect && (
               <Button
-                variant={isSelected ? "analytics" : "outline"}
+                variant={isSelected ? "default" : "outline"}
                 onClick={onToggleSelect}
                 aria-label={isSelected ? "Selected" : `Use for analysis`}
               >
@@ -88,7 +88,7 @@ export function EntityDetailsDialog({
           {subtitle && <DialogDescription>{subtitle}</DialogDescription>}
         </DialogHeader>
 
-        <ScrollArea className={`${scrollHeight} pr-4`}>
+        <ScrollArea className={`min-h-0 ${scrollHeight} pr-4`}>
           <Accordion
             type="multiple"
             defaultValue={sections.slice(0, 2).map((s) => s.value)}

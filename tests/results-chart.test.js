@@ -60,4 +60,23 @@ describe("results chart utilities", () => {
     assert.ok(rows.some((row) => row.feature === "Sunroof"));
     assert.ok(rows.some((row) => row.feature === "Tow Package"));
   });
+
+  it("sorts differences from highest positive to most negative", () => {
+    const personaA = [
+      makeRow({ featureId: "f-1", featureName: "Feature 1", perceivedValue: 1000 }),
+      makeRow({ featureId: "f-2", featureName: "Feature 2", perceivedValue: 300 }),
+      makeRow({ featureId: "f-3", featureName: "Feature 3", perceivedValue: 500 }),
+    ];
+    const personaB = [
+      makeRow({ featureId: "f-1", featureName: "Feature 1", perceivedValue: 200 }),
+      makeRow({ featureId: "f-2", featureName: "Feature 2", perceivedValue: 700 }),
+      makeRow({ featureId: "f-3", featureName: "Feature 3", perceivedValue: 450 }),
+    ];
+
+    const rows = buildDifferenceData(personaA, personaB);
+    const differences = rows.map((row) => row.difference);
+
+    assert.deepEqual(differences, [800, 50, -400]);
+    assert.deepEqual(rows.map((row) => row.feature), ["Feature 1", "Feature 3", "Feature 2"]);
+  });
 });

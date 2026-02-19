@@ -6,6 +6,8 @@ type PerceivedValue = {
 
 export type DifferenceRow = {
   feature: string;
+  valueA: number;
+  valueB: number;
   difference: number;
 };
 
@@ -24,7 +26,18 @@ export type BarLayout = {
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
-const normalizeLabel = (value: string) => value.trim().toLowerCase();
+const normalizeLabel = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ");
+
+const makeFeatureKey = (item: PerceivedValue) => {
+  const normalizedName = normalizeLabel(item.featureName);
+  if (normalizedName) return normalizedName;
+  return (item.featureId || "").trim().toLowerCase();
+};
 
 export const buildAxisLayout = (labels: string[]): AxisLayout => {
   const maxLabelLength = labels.reduce((max, label) => Math.max(max, label.length), 0);
@@ -61,56 +74,41 @@ export const buildBarLayout = ({
   };
 };
 
-const buildByNameIndex = (items: PerceivedValue[]) => {
-  const index = new Map<string, PerceivedValue>();
-  for (const item of items) {
-    const key = normalizeLabel(item.featureName);
-    if (!index.has(key)) {
-      index.set(key, item);
-    }
-  }
-  return index;
-};
-
 export const buildDifferenceData = (
   personaAResults: PerceivedValue[],
   personaBResults: PerceivedValue[]
 ): DifferenceRow[] => {
-  if (personaAResults.length === 0 || personaBResults.length === 0) return [];
+  const merged = new Map<string, { feature: string; valueA: number; valueB: number }>();
 
-  const bById = new Map(personaBResults.map((item) => [item.featureId, item]));
-  const bByName = buildByNameIndex(personaBResults);
-  const usedB = new Set<string>();
-  const rows: DifferenceRow[] = [];
-
-  for (const a of personaAResults) {
-    const byId = bById.get(a.featureId);
-    const byName = bByName.get(normalizeLabel(a.featureName));
-    const match = byId ?? byName;
-
-    if (match) {
-      usedB.add(match.featureId);
-      rows.push({
-        feature: a.featureName,
-        difference: Number((a.perceivedValue - match.perceivedValue).toFixed(2)),
-      });
-    } else {
-      rows.push({
-        feature: a.featureName,
-        difference: Number(a.perceivedValue.toFixed(2)),
-      });
-    }
-  }
-
-  for (const b of personaBResults) {
-    if (usedB.has(b.featureId)) continue;
-    rows.push({
-      feature: b.featureName,
-      difference: Number((-b.perceivedValue).toFixed(2)),
+  for (const row of personaAResults) {
+    const key = makeFeatureKey(row);
+    if (!key) continue;
+    const existing = merged.get(key);
+    merged.set(key, {
+      feature: existing?.feature || row.featureName || row.featureId,
+      valueA: Number.isFinite(row.perceivedValue) ? row.perceivedValue : existing?.valueA ?? 0,
+      valueB: existing?.valueB ?? 0,
     });
   }
 
-  return rows
-    .filter((row) => Number.isFinite(row.difference))
-    .sort((left, right) => Math.abs(right.difference) - Math.abs(left.difference));
+  for (const row of personaBResults) {
+    const key = makeFeatureKey(row);
+    if (!key) continue;
+    const existing = merged.get(key);
+    merged.set(key, {
+      feature: existing?.feature || row.featureName || row.featureId,
+      valueA: existing?.valueA ?? 0,
+      valueB: Number.isFinite(row.perceivedValue) ? row.perceivedValue : existing?.valueB ?? 0,
+    });
+  }
+
+  return Array.from(merged.values())
+    .map((row) => ({
+      feature: row.feature,
+      valueA: Number(row.valueA.toFixed(2)),
+      valueB: Number(row.valueB.toFixed(2)),
+      difference: Number((row.valueA - row.valueB).toFixed(2)),
+    }))
+    .filter((row) => Number.isFinite(row.valueA) && Number.isFinite(row.valueB) && Number.isFinite(row.difference))
+    .sort((left, right) => right.difference - left.difference);
 };

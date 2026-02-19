@@ -98,7 +98,7 @@ export const ConfigPage = ({ onClose }: ConfigPageProps) => {
 
   const getHealthBadgeStyle = (status: 'healthy' | 'warning' | 'error') => {
     if (status === 'healthy') return 'bg-data-positive/10 text-data-positive border-data-positive/20';
-    if (status === 'warning') return 'bg-amber-50 text-amber-700 border-amber-200';
+    if (status === 'warning') return 'bg-data-warning/10 text-data-warning border-data-warning/25';
     return 'bg-data-negative/10 text-data-negative border-data-negative/20';
   };
 
@@ -119,7 +119,7 @@ export const ConfigPage = ({ onClose }: ConfigPageProps) => {
               <CardTitle className="text-base">Setup Status</CardTitle>
               <CardDescription>Live checks to confirm your environment is ready for analysis</CardDescription>
             </div>
-            <Button variant="outline" size="sm" onClick={refreshSetupStatus} disabled={isCheckingHealth}>
+            <Button variant="secondary" size="sm" onClick={refreshSetupStatus} disabled={isCheckingHealth}>
               {isCheckingHealth ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
               Check now
             </Button>
@@ -145,7 +145,7 @@ export const ConfigPage = ({ onClose }: ConfigPageProps) => {
           </div>
 
           {healthResult?.checks?.length ? (
-            <div className="space-y-2 rounded-md border p-3">
+            <div className="space-y-2 rounded-md border border-border-subtle bg-muted/15 p-3">
               {healthResult.checks.map((check) => (
                 <div key={check.id} className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
