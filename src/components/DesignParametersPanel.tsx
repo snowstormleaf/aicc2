@@ -110,7 +110,7 @@ export const DesignParametersPanel = ({ featureCount }: DesignParametersPanelPro
             </div>
           </div>
 
-          <div className="space-y-3 rounded-md border p-3">
+          <div className="space-y-3 rounded-md border border-border-subtle bg-muted/10 p-3">
             <div className="rounded-md bg-muted/40 p-3">
               <div>
                 <p className="text-sm font-medium">Voucher spacing policy</p>
@@ -140,6 +140,19 @@ export const DesignParametersPanel = ({ featureCount }: DesignParametersPanelPro
               <Switch
                 checked={analysisSettings.defaultUseCache}
                 onCheckedChange={(checked) => updateAnalysisSettings("defaultUseCache", checked)}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">Simulate API calls (testing)</p>
+                <p className="text-xs text-muted-foreground">
+                  Generate random ranking responses with realistic call timing, without sending real OpenAI requests.
+                </p>
+              </div>
+              <Switch
+                checked={analysisSettings.simulateApiCalls}
+                onCheckedChange={(checked) => updateAnalysisSettings("simulateApiCalls", checked)}
               />
             </div>
 
@@ -204,7 +217,7 @@ export const DesignParametersPanel = ({ featureCount }: DesignParametersPanelPro
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Design efficiency:</span>
-                <Badge variant={designParams.efficiency > 0.8 ? "default" : "outline"} className="text-xs">
+                <Badge variant={designParams.efficiency > 0.8 ? "selected" : "outline"} className="text-xs">
                   {Math.round(designParams.efficiency * 100)}%
                 </Badge>
               </div>

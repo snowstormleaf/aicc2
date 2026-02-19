@@ -53,14 +53,14 @@ export const BurgerMenu = ({ open, onOpenChange, activeTab, onTabChange, feature
   return (
     <Sheet open={isMenuOpen} onOpenChange={setMenuOpen}>
       <SheetTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-9 w-9" aria-label="Open menu">
+        <Button variant="tertiary" size="icon" className="h-9 w-9" aria-label="Open workspace menu">
           <Menu className="h-5 w-5" />
         </Button>
       </SheetTrigger>
 
-      <SheetContent side="right" className="flex h-full w-full flex-col overflow-hidden sm:max-w-[520px]">
+      <SheetContent side="right" className="flex h-full w-full flex-col overflow-hidden sm:max-w-[540px]">
         <SheetHeader>
-          <SheetTitle className="flex items-center gap-2">
+          <SheetTitle className="flex items-center gap-2 text-left">
             <Settings className="h-5 w-5" />
             Workspace
           </SheetTitle>
@@ -91,16 +91,16 @@ export const BurgerMenu = ({ open, onOpenChange, activeTab, onTabChange, feature
               <DesignParametersPanel featureCount={featureCount} />
             </TabsContent>
 
-            <TabsContent value="filters" className="mt-4 space-y-4">
+            <TabsContent value="filters" className="mt-4 space-y-4" id="filters-hub">
               <div>
                 <Label className="text-sm font-medium">Brand filter</Label>
                 <p className="text-xs text-muted-foreground mb-2">
                   Select brands, then click Apply Filter. Workflow selectors are filtered; libraries remain unfiltered.
                 </p>
-                <div className="space-y-3 rounded-md border p-3">
+                <div className="space-y-3 rounded-md border border-border-subtle bg-muted/15 p-3">
                   <div className="max-h-56 space-y-2 overflow-auto pr-1">
                     {brandOptions.map((brand) => (
-                      <label key={brand} className="flex items-center gap-2 text-sm">
+                      <label key={brand} className="flex items-center gap-2 rounded-sm px-1 py-0.5 text-sm">
                         <Checkbox
                           checked={selectedBrandsDraft.includes(brand)}
                           onCheckedChange={() => toggleDraftBrand(brand)}
@@ -118,7 +118,7 @@ export const BurgerMenu = ({ open, onOpenChange, activeTab, onTabChange, feature
                     <Button size="sm" onClick={applyBrandFilter} disabled={selectedBrandsDraft.length === 0}>
                       Apply filter
                     </Button>
-                    <Button size="sm" variant="outline" onClick={clearBrandFilter}>
+                    <Button size="sm" variant="secondary" onClick={clearBrandFilter}>
                       All brands
                     </Button>
                   </div>

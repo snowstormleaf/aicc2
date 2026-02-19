@@ -35,18 +35,6 @@ export function VehicleDetailsDialog(props: {
           <span className="text-muted-foreground">{vehicle.year}</span>
         </div>
       )}
-      {vehicle.description && (
-        <p className="text-sm text-muted-foreground">{vehicle.description}</p>
-      )}
-      {!!vehicle.tags?.length && (
-        <div className="flex flex-wrap gap-1">
-          {vehicle.tags.slice(0, 8).map((t) => (
-            <Badge key={t} variant="secondary" className="text-xs">
-              {t}
-            </Badge>
-          ))}
-        </div>
-      )}
     </div>
   );
 
@@ -137,7 +125,7 @@ export function VehicleDetailsDialog(props: {
       sections={sections}
       isSelected={isSelected}
       onToggleSelect={onToggleSelect}
-      scrollHeight="h-[40vh]"
+      scrollHeight="h-[56vh]"
     />
   );
 }

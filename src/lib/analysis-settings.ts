@@ -7,6 +7,7 @@ export interface AnalysisSettings {
   autoRecommendVouchers: boolean;
   persistResults: boolean;
   defaultUseCache: boolean;
+  simulateApiCalls: boolean;
   showProgressUpdates: boolean;
   hideMaterialCost: boolean;
 }
@@ -17,6 +18,7 @@ export const DEFAULT_ANALYSIS_SETTINGS: AnalysisSettings = {
   autoRecommendVouchers: true,
   persistResults: true,
   defaultUseCache: false,
+  simulateApiCalls: false,
   showProgressUpdates: true,
   hideMaterialCost: false,
 };
@@ -31,6 +33,7 @@ const normalizeSettings = (candidate: Partial<AnalysisSettings>): AnalysisSettin
     candidate.autoRecommendVouchers ?? DEFAULT_ANALYSIS_SETTINGS.autoRecommendVouchers,
   persistResults: candidate.persistResults ?? DEFAULT_ANALYSIS_SETTINGS.persistResults,
   defaultUseCache: candidate.defaultUseCache ?? DEFAULT_ANALYSIS_SETTINGS.defaultUseCache,
+  simulateApiCalls: candidate.simulateApiCalls ?? DEFAULT_ANALYSIS_SETTINGS.simulateApiCalls,
   showProgressUpdates: candidate.showProgressUpdates ?? DEFAULT_ANALYSIS_SETTINGS.showProgressUpdates,
   hideMaterialCost: candidate.hideMaterialCost ?? DEFAULT_ANALYSIS_SETTINGS.hideMaterialCost,
 });

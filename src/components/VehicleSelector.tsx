@@ -2,7 +2,7 @@ import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Eye, Edit2 } from "lucide-react";
+import { Eye, Edit2, CheckCircle2 } from "lucide-react";
 import { useVehicles } from "@/vehicles/store";
 import { VehicleDetailsDialog } from "@/components/VehicleDetailsDialog";
 import { VehicleUpsertDialog } from "@/components/VehicleUpsertDialog";
@@ -44,18 +44,19 @@ export const VehicleSelector = ({ selectedVehicle, onSelectVehicle }: VehicleSel
   if (vehicles.length === 0) {
     return (
       <div className="space-y-6">
-        <div className="space-y-3">
-          <div className="text-center">
-            <h2 className="text-2xl font-bold text-foreground mb-2">Select Target Vehicle</h2>
-            <p className="text-muted-foreground">Choose a vehicle model for feature analysis</p>
+        <div className="space-y-3 text-center">
+          <div>
+            <p className="type-caption">Step 2</p>
+            <h2 className="type-headline">Select Target Vehicle</h2>
+            <p className="type-deck mx-auto content-measure">Choose a vehicle model for feature analysis.</p>
           </div>
           <div className="flex justify-end">
-            <Button asChild variant="outline" size="sm">
+            <Button asChild variant="secondary" size="sm">
               <Link to="/vehicle-library">Open Vehicle Library</Link>
             </Button>
           </div>
         </div>
-        <div className="text-center p-12 border-2 border-dashed rounded-lg">
+        <div className="rounded-lg border border-dashed border-border p-12 text-center">
           <p className="text-muted-foreground mb-4">No vehicles created yet.</p>
           <p className="text-sm text-muted-foreground">
             Open Vehicle Library from the analysis workflow to create vehicles.
@@ -67,29 +68,30 @@ export const VehicleSelector = ({ selectedVehicle, onSelectVehicle }: VehicleSel
 
   return (
     <div className="space-y-6">
-      <div className="space-y-3">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-foreground mb-2">Select Target Vehicle</h2>
-          <p className="text-muted-foreground">Choose the vehicle model for feature analysis</p>
+      <div className="space-y-3 text-center">
+        <div>
+          <p className="type-caption">Step 2</p>
+          <h2 className="type-headline">Select Target Vehicle</h2>
+          <p className="type-deck mx-auto content-measure">Choose the vehicle model for feature analysis.</p>
         </div>
         <div className="flex justify-end">
-          <Button asChild variant="outline" size="sm">
+          <Button asChild variant="secondary" size="sm">
             <Link to="/vehicle-library">Open Vehicle Library</Link>
           </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         {filteredVehicles.map((vehicle) => {
           const isSelected = selectedVehicle === vehicle.id;
 
           return (
             <Card
               key={vehicle.id}
-              className={`cursor-pointer transition-all duration-200 hover:shadow-lg ${
+              className={`group flex h-full cursor-pointer flex-col transition-all duration-200 ${
                 isSelected
-                  ? "ring-2 ring-primary shadow-lg bg-primary/5"
-                  : "hover:shadow-md"
+                  ? "border-primary/35 bg-primary/10 shadow-card"
+                  : "hover:border-border hover:shadow-card"
               }`}
               onClick={() => onSelectVehicle(vehicle.id)}
             >
@@ -111,35 +113,38 @@ export const VehicleSelector = ({ selectedVehicle, onSelectVehicle }: VehicleSel
                 </div>
               </CardHeader>
 
-              <CardContent className="space-y-4">
-                {vehicle.description && (
-                  <p className="text-sm text-muted-foreground line-clamp-3">
-                    {vehicle.description}
-                  </p>
-                )}
+              <CardContent className="flex flex-1 flex-col gap-4">
+                <div className="flex-1 space-y-4">
+                  {vehicle.description && (
+                    <p className="text-sm text-muted-foreground line-clamp-3">
+                      {vehicle.description}
+                    </p>
+                  )}
 
-                {!!vehicle.tags?.length && (
-                  <div>
-                    <h4 className="font-medium text-sm mb-2">Tags</h4>
-                    <div className="flex flex-wrap gap-1">
-                      {vehicle.tags.slice(0, 6).map((tag) => (
-                        <Badge key={tag} variant="secondary" className="text-xs">
-                          {tag}
-                        </Badge>
-                      ))}
+                  {!!vehicle.tags?.length && (
+                    <div>
+                      <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tags</h4>
+                      <div className="flex flex-wrap gap-1">
+                        {vehicle.tags.slice(0, 6).map((tag) => (
+                          <Badge key={tag} variant="secondary" className="text-xs">
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
 
-                <div className="flex gap-2 pt-2">
+                <div className="mt-auto flex gap-2 pt-2">
                   <Button
-                    variant={isSelected ? "analytics" : "outline"}
+                    variant={isSelected ? "default" : "outline"}
                     className="flex-1"
                     onClick={(e) => {
                       e.stopPropagation();
                       onSelectVehicle(vehicle.id);
                     }}
                   >
+                    {isSelected && <CheckCircle2 className="h-4 w-4" />}
                     {isSelected ? "Selected" : "Select"}
                   </Button>
 
@@ -176,14 +181,14 @@ export const VehicleSelector = ({ selectedVehicle, onSelectVehicle }: VehicleSel
       </div>
 
       {filteredVehicles.length === 0 && normalizedBrandSet.size > 0 && (
-        <div className="text-center p-6 border rounded-lg text-sm text-muted-foreground">
+        <div className="rounded-lg border border-border-subtle p-6 text-center text-sm text-muted-foreground">
           No vehicles found for selected brand filter. Update filters in Workspace.
         </div>
       )}
 
       {selectedVehicle && (
-        <div className="mt-6 p-4 bg-muted rounded-lg">
-          <p className="text-sm font-medium">
+        <div className="mt-6 rounded-lg border border-primary/30 bg-primary/10 p-4">
+          <p className="text-sm font-semibold">
             Selected Vehicle: {getVehicleName(selectedVehicle)}
           </p>
         </div>

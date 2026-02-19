@@ -71,68 +71,68 @@ function defaultRenderEntityCard<T>(
     : [];
 
   return (
-    <Card key={id} className="hover:shadow-sm transition-shadow">
+    <Card key={id} className="flex h-full flex-col overflow-hidden transition-all duration-200 hover:border-border hover:shadow-card">
       <CardHeader className="pb-2">
-        <CardTitle className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="truncate">{title}</div>
-            {subtitle && <CardDescription className="truncate">{subtitle}</CardDescription>}
-          </div>
-
-          <div className="flex gap-1 shrink-0">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => callbacks.onDetails(id)}
-              aria-label="View details"
-              title="View details"
-            >
-              <Eye className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => callbacks.onEdit(entity)}
-              aria-label="Edit"
-              title="Edit"
-            >
-              <Pencil className="h-4 w-4" />
-            </Button>
-            {hasResetButton && isSeed && callbacks.onReset && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => callbacks.onReset?.(id)}
-                aria-label="Reset to seed"
-                title="Reset to seed"
-              >
-                <RotateCcw className="h-4 w-4" />
-              </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => callbacks.onDelete(id)}
-              aria-label="Delete"
-              title="Delete"
-            >
-              <Trash2 className="h-4 w-4 text-destructive" />
-            </Button>
-          </div>
+        <CardTitle className="min-w-0">
+          <div className="truncate">{title}</div>
+          {subtitle && <CardDescription className="truncate">{subtitle}</CardDescription>}
         </CardTitle>
       </CardHeader>
 
-      {tags.length > 0 && (
-        <CardContent>
-          <div className="flex flex-wrap gap-1">
-            {tags.slice(0, 6).map((tag: string) => (
-              <Badge key={tag} variant="secondary" className="text-xs">
-                {tag}
-              </Badge>
-            ))}
-          </div>
-        </CardContent>
-      )}
+      <CardContent className="flex flex-1 flex-col gap-3">
+        <div className="flex-1">
+          {tags.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {tags.slice(0, 6).map((tag: string) => (
+                <Badge key={tag} variant="secondary" className="text-xs">
+                  {tag}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-auto flex gap-1 self-end">
+          <Button
+            variant="tertiary"
+            size="icon"
+            onClick={() => callbacks.onDetails(id)}
+            aria-label="View details"
+            title="View details"
+          >
+            <Eye className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="tertiary"
+            size="icon"
+            onClick={() => callbacks.onEdit(entity)}
+            aria-label="Edit"
+            title="Edit"
+          >
+            <Pencil className="h-4 w-4" />
+          </Button>
+          {hasResetButton && isSeed && callbacks.onReset && (
+            <Button
+              variant="tertiary"
+              size="icon"
+              onClick={() => callbacks.onReset?.(id)}
+              aria-label="Reset to seed"
+              title="Reset to seed"
+            >
+              <RotateCcw className="h-4 w-4" />
+            </Button>
+          )}
+          <Button
+            variant="tertiary"
+            size="icon"
+            onClick={() => callbacks.onDelete(id)}
+            aria-label="Delete"
+            title="Delete"
+          >
+            <Trash2 className="h-4 w-4 text-destructive" />
+          </Button>
+        </div>
+      </CardContent>
     </Card>
   );
 }
@@ -174,8 +174,8 @@ export function EntityLibrary<T extends { id: string }>({
   const newButtonText = entityType === "persona" ? "New Persona" : entityType === "vehicle" ? "New Vehicle" : "New";
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2">
+    <div className="space-y-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
           <Input
@@ -191,9 +191,9 @@ export function EntityLibrary<T extends { id: string }>({
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 gap-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {filtered.length === 0 ? (
-          <div className="text-center p-12">
+          <div className="col-span-full rounded-lg border border-border-subtle bg-muted/15 p-12 text-center">
             <p className="text-muted-foreground">
               {query ? "No results found." : `No ${entityType}s yet.`}
             </p>

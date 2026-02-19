@@ -2,7 +2,7 @@ import * as React from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Users, Briefcase, ShoppingCart, Eye, Edit2 } from "lucide-react";
+import { Users, Briefcase, ShoppingCart, Eye, Edit2, CheckCircle2 } from "lucide-react";
 import { usePersonas } from "@/personas/store";
 import { PersonaDetailsDialog } from "@/components/PersonaDetailsDialog";
 import { PersonaUpsertDialog } from "@/components/PersonaUpsertDialog";
@@ -58,19 +58,20 @@ export const PersonaSelector = ({ selectedPersonas, onPersonaSelect }: PersonaSe
 
   return (
     <div className="space-y-6">
-      <div className="text-center">
-        <h2 className="text-2xl font-bold text-foreground mb-2">Select Target Persona</h2>
-        <p className="text-muted-foreground">
+      <div className="space-y-2 text-center">
+        <p className="type-caption">Step 1</p>
+        <h2 className="type-headline">Select Target Persona</h2>
+        <p className="type-deck mx-auto content-measure">
           Choose one or more customer personas. Multiple personas enable comparison analysis.
         </p>
       </div>
       <div className="flex justify-end">
-        <Button asChild variant="outline" size="sm">
+        <Button asChild variant="secondary" size="sm">
           <Link to="/persona-library">Open Persona Library</Link>
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {filteredPersonas.map((persona) => {
           const Icon = personaIcon(persona.id);
           const isSelected = selectedPersonas.includes(persona.id);
@@ -78,15 +79,17 @@ export const PersonaSelector = ({ selectedPersonas, onPersonaSelect }: PersonaSe
           return (
             <Card
               key={persona.id}
-              className={`cursor-pointer transition-all duration-200 hover:shadow-lg ${
-                isSelected ? "ring-2 ring-primary shadow-lg bg-primary/5" : "hover:shadow-md"
+              className={`group flex h-full cursor-pointer flex-col transition-all duration-200 ${
+                isSelected
+                  ? "border-primary/35 bg-primary/10 shadow-card"
+                  : "hover:border-border hover:shadow-card"
               }`}
               onClick={() => handlePersonaToggle(persona.id)}
             >
               <CardHeader className="text-center">
                 <div
-                  className={`mx-auto p-3 rounded-full w-fit ${
-                    isSelected ? "bg-primary text-primary-foreground" : "bg-muted"
+                  className={`mx-auto w-fit rounded-full p-3 ${
+                    isSelected ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
                   }`}
                 >
                   <Icon className="h-6 w-6" />
@@ -97,36 +100,39 @@ export const PersonaSelector = ({ selectedPersonas, onPersonaSelect }: PersonaSe
                 </CardDescription>
               </CardHeader>
 
-              <CardContent className="space-y-4">
-                {!!persona.traits?.length && (
-                  <div>
-                    <h4 className="font-medium text-sm mb-2">Key traits</h4>
-                    <div className="flex flex-wrap gap-1">
-                      {persona.traits.slice(0, 6).map((trait) => (
-                        <Badge key={trait} variant="secondary" className="text-xs">
-                          {trait}
-                        </Badge>
-                      ))}
+              <CardContent className="flex flex-1 flex-col gap-4">
+                <div className="flex-1 space-y-4">
+                  {!!persona.traits?.length && (
+                    <div>
+                      <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Key traits</h4>
+                      <div className="flex flex-wrap gap-1">
+                        {persona.traits.slice(0, 6).map((trait) => (
+                          <Badge key={trait} variant="secondary" className="text-xs">
+                            {trait}
+                          </Badge>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                <div>
-                  <h4 className="font-medium text-sm mb-1">Demographics</h4>
-                  <p className="text-xs text-muted-foreground">
-                    {persona.demographics.age} · {persona.demographics.location}
-                  </p>
+                  <div>
+                    <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Demographics</h4>
+                    <p className="text-xs text-muted-foreground">
+                      {persona.demographics.age} · {persona.demographics.location}
+                    </p>
+                  </div>
                 </div>
 
-                <div className="flex gap-2">
+                <div className="mt-auto flex gap-2">
                   <Button
-                    variant={isSelected ? "analytics" : "outline"}
+                    variant={isSelected ? "default" : "outline"}
                     className="flex-1"
                     onClick={(e) => {
                       e.stopPropagation();
                       handlePersonaToggle(persona.id);
                     }}
                   >
+                    {isSelected && <CheckCircle2 className="h-4 w-4" />}
                     {isSelected ? "Selected" : "Select"}
                   </Button>
 
@@ -163,14 +169,14 @@ export const PersonaSelector = ({ selectedPersonas, onPersonaSelect }: PersonaSe
       </div>
 
       {filteredPersonas.length === 0 && normalizedBrandSet.size > 0 && (
-        <div className="text-center p-6 border rounded-lg text-sm text-muted-foreground">
+        <div className="rounded-lg border border-border-subtle p-6 text-center text-sm text-muted-foreground">
           No personas found for selected brand filter. Update filters in Workspace.
         </div>
       )}
 
       {selectedPersonas.length > 0 && (
-        <div className="mt-6 p-4 bg-muted rounded-lg">
-          <p className="text-sm font-medium">
+        <div className="mt-6 rounded-lg border border-primary/30 bg-primary/10 p-4">
+          <p className="text-sm font-semibold">
             Selected Personas: {selectedPersonas.map(getPersonaName).join(", ")}
           </p>
         </div>

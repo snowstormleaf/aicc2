@@ -198,7 +198,7 @@ export const runSetupHealthChecks = async (): Promise<SetupHealthResult> => {
     createCheck(
       'analysis-settings',
       'Analysis settings',
-      `Retries: ${analysisSettings.maxRetries}, temperature: ${analysisSettings.temperature.toFixed(1)}.`,
+      `Retries: ${analysisSettings.maxRetries}, temperature: ${analysisSettings.temperature.toFixed(1)}, simulation mode: ${analysisSettings.simulateApiCalls ? 'on' : 'off'}.`,
       'healthy',
       false,
       'Adjust retries/temperature and toggle behavior in Workspace > Configuration > Analysis Settings.'

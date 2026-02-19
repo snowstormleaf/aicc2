@@ -3,6 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   ScatterChart,
   Scatter,
@@ -50,9 +51,10 @@ type ValueOnlyRow = {
   averageValue: number;
 } & Record<string, number | string>;
 
-const PERSONA_COLORS = ["#0ea5e9", "#22c55e", "#f97316", "#e11d48", "#a855f7", "#14b8a6"];
+const PERSONA_COLORS = ["#0f766e", "#166534", "#0369a1", "#92400e", "#b91c1c", "#334155"];
 
 const formatCurrencyInt = (value: number) => `$${Math.round(value).toLocaleString()}`;
+const truncateLabel = (value: string, max = 28) => (value.length <= max ? value : `${value.slice(0, max - 1)}…`);
 
 const getNiceAxisMax = (value: number) => {
   const safe = Math.max(1, value);
@@ -202,18 +204,21 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
     () => buildAxisLayout(valueOnlyData.map((row) => row.featureName)),
     [valueOnlyData]
   );
-  const differenceTopRows = useMemo(() => differenceData.slice(0, 10), [differenceData]);
+  const valueOnlyAxisWidth = useMemo(
+    () => Math.min(230, valueOnlyAxisLayout.axisWidth),
+    [valueOnlyAxisLayout.axisWidth]
+  );
   const comparisonAxisLayout = useMemo(
-    () => buildAxisLayout(differenceTopRows.map((row) => row.feature)),
-    [differenceTopRows]
+    () => buildAxisLayout(differenceData.map((row) => row.feature)),
+    [differenceData]
+  );
+  const comparisonAxisWidth = useMemo(
+    () => Math.min(220, comparisonAxisLayout.axisWidth),
+    [comparisonAxisLayout.axisWidth]
   );
   const differenceChartRows = useMemo(
-    () =>
-      differenceTopRows.map((row) => ({
-        ...row,
-        renderDifference: row.difference === 0 ? 0.0001 : row.difference,
-      })),
-    [differenceTopRows]
+    () => differenceData,
+    [differenceData]
   );
   const valueOnlyBarLayout = useMemo(
     () =>
@@ -233,6 +238,14 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
       }),
     [differenceChartRows.length]
   );
+  const differenceDomain = useMemo<[number, number]>(() => {
+    if (differenceChartRows.length === 0) return [-1, 1];
+    const minDiff = Math.min(...differenceChartRows.map((row) => row.difference), 0);
+    const maxDiff = Math.max(...differenceChartRows.map((row) => row.difference), 0);
+    const spread = maxDiff - minDiff;
+    const pad = Math.max(1, spread * 0.08);
+    return [minDiff - pad, maxDiff + pad];
+  }, [differenceChartRows]);
 
   const downloadResults = () => {
     let csvContent = "Persona,Feature Name,Description,Material Cost (USD),Perceived Value (USD),Value Ratio,Category\n";
@@ -371,16 +384,17 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
 
   return (
     <div className="space-y-6">
-      <div className="text-center">
-        <h2 className="mb-2 text-2xl font-bold text-foreground">Perceived Feature Values</h2>
-        <p className="text-muted-foreground">
+      <div className="space-y-2 text-center">
+        <p className="type-caption">Step 5</p>
+        <h2 className="type-headline">Perceived Feature Values</h2>
+        <p className="type-deck mx-auto content-measure">
           {hideMaterialCost
             ? "Feature perceived value ranking"
             : "Material cost vs. perceived customer value from MaxDiff analysis"}
         </p>
       </div>
 
-      <Card className="border-primary/10 bg-gradient-to-br from-card to-muted/20">
+      <Card className="border-primary/20 bg-gradient-to-br from-card to-muted/20" id="insights-export">
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -409,9 +423,9 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
         <CardContent>
           {!hideMaterialCost ? (
             <>
-              <div className="h-96 w-full rounded-md border bg-background/60 p-2">
+              <div className="h-[420px] w-full overflow-hidden rounded-md border border-border-subtle bg-background/60 p-3">
                 <ResponsiveContainer width="100%" height="100%">
-                  <ScatterChart margin={{ top: 20, right: 30, bottom: 30, left: 20 }}>
+                  <ScatterChart margin={{ top: 20, right: 18, bottom: 18, left: 6 }}>
                     <CartesianGrid strokeDasharray="4 4" stroke="hsl(var(--border))" />
                     <XAxis
                       type="number"
@@ -420,7 +434,6 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
                       domain={[0, xAxisMax]}
                       tick={{ fontSize: 12 }}
                       tickFormatter={(value) => formatCurrencyInt(Number(value))}
-                      label={{ value: "Feature material cost", position: "insideBottom", offset: -10 }}
                     />
                     <YAxis
                       type="number"
@@ -429,10 +442,9 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
                       domain={[0, yAxisMax]}
                       tick={{ fontSize: 12 }}
                       tickFormatter={(value) => formatCurrencyInt(Number(value))}
-                      label={{ value: "Perceived customer value", angle: -90, position: "insideLeft" }}
                     />
                     <Tooltip content={<CustomTooltip />} />
-                    <Legend verticalAlign="top" align="right" wrapperStyle={{ fontSize: "12px" }} />
+                    <Legend verticalAlign="top" align="right" wrapperStyle={{ fontSize: "11px", paddingBottom: "4px" }} />
                     <ReferenceLine
                       segment={[
                         { x: 0, y: 0 },
@@ -456,7 +468,7 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
                 </ResponsiveContainer>
               </div>
 
-              <div className="mt-4 rounded-md border bg-background/70 p-3">
+              <div className="mt-4 rounded-md border border-border-subtle bg-background/70 p-3">
                 <div className="mb-2 flex items-center justify-between gap-4 text-sm">
                   <span className="font-medium">Parity line: {parityPercent[0]}%</span>
                   <span className="text-muted-foreground">100% means value = cost</span>
@@ -472,12 +484,12 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
               </div>
             </>
           ) : (
-            <div className="w-full rounded-md border bg-background/60 p-2" style={{ height: `${valueOnlyBarLayout.chartHeight}px` }}>
+            <div className="w-full overflow-hidden rounded-md border border-border-subtle bg-background/60 p-3" style={{ height: `${valueOnlyBarLayout.chartHeight}px` }}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
                   data={valueOnlyData}
                   layout="vertical"
-                  margin={{ top: 20, right: 30, bottom: 20, left: valueOnlyAxisLayout.leftMargin }}
+                  margin={{ top: 20, right: 14, bottom: 20, left: 12 }}
                   barCategoryGap={valueOnlyBarLayout.barCategoryGap}
                   barGap={valueOnlyBarLayout.barGap}
                 >
@@ -486,9 +498,10 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
                   <YAxis
                     dataKey="featureName"
                     type="category"
-                    width={valueOnlyAxisLayout.axisWidth}
+                    width={valueOnlyAxisWidth}
                     tick={{ fontSize: valueOnlyAxisLayout.fontSize }}
                     interval={0}
+                    tickFormatter={(value) => truncateLabel(String(value))}
                   />
                   <Tooltip formatter={(value) => formatCurrencyInt(Number(value))} />
                   <Legend />
@@ -511,7 +524,7 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
       </Card>
 
       {personas.length > 1 && (
-        <Card>
+        <Card id="insights-compare">
           <CardHeader>
             <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
               <div>
@@ -519,7 +532,9 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
                   <TrendingUp className="h-5 w-5 text-primary" />
                   Difference in Perceived Value: {personaA || "Persona A"} - {personaB || "Persona B"}
                 </CardTitle>
-                <CardDescription>Features where selected personas differ most in perceived value</CardDescription>
+                <CardDescription>
+                  Per-feature delta sorted from most positive to most negative (Persona A minus Persona B)
+                </CardDescription>
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
                 <div className="space-y-1">
@@ -561,29 +576,45 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
             ) : differenceData.length === 0 ? (
               <p className="text-sm text-muted-foreground">No overlapping features to compare for these personas.</p>
             ) : (
-              <div className="w-full" style={{ height: `${comparisonBarLayout.chartHeight}px` }}>
+              <div className="w-full overflow-hidden rounded-md border border-border-subtle bg-background/60 p-3" style={{ height: `${comparisonBarLayout.chartHeight}px` }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
                     data={differenceChartRows}
-                    margin={{ top: 20, right: 20, bottom: 20, left: comparisonAxisLayout.leftMargin }}
+                    layout="vertical"
+                    margin={{ top: 20, right: 16, bottom: 20, left: 12 }}
                     barCategoryGap={comparisonBarLayout.barCategoryGap}
                     barGap={comparisonBarLayout.barGap}
                   >
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis
                       type="number"
+                      domain={differenceDomain}
                       tickFormatter={(value) => formatCurrencyInt(Number(value))}
                       label={{ value: `${personaA} minus ${personaB}`, position: "insideBottom", offset: -10 }}
                     />
                     <YAxis
                       dataKey="feature"
                       type="category"
-                      width={comparisonAxisLayout.axisWidth}
+                      width={comparisonAxisWidth}
                       tick={{ fontSize: comparisonAxisLayout.fontSize }}
                       interval={0}
+                      tickFormatter={(value) => truncateLabel(String(value))}
                     />
-                    <Tooltip formatter={(_, __, item) => [formatCurrencyInt(Number(item?.payload?.difference ?? 0)), "Difference"]} />
-                    <Bar dataKey="renderDifference" minPointSize={3} barSize={comparisonBarLayout.barSize}>
+                    <Tooltip
+                      cursor={false}
+                      formatter={(_, __, item) => {
+                        const payload = item?.payload as { difference?: number; valueA?: number; valueB?: number } | undefined;
+                        const difference = Number(payload?.difference ?? 0);
+                        return [formatCurrencyInt(difference), `${personaA} - ${personaB}`];
+                      }}
+                      labelFormatter={(label, payload) => {
+                        const row = payload?.[0]?.payload as { feature?: string; valueA?: number; valueB?: number } | undefined;
+                        if (!row) return String(label);
+                        return `${row.feature} (${personaA}: ${formatCurrencyInt(Number(row.valueA ?? 0))}, ${personaB}: ${formatCurrencyInt(Number(row.valueB ?? 0))})`;
+                      }}
+                    />
+                    <ReferenceLine x={0} stroke="hsl(var(--border))" strokeDasharray="4 4" />
+                    <Bar dataKey="difference" minPointSize={3} barSize={comparisonBarLayout.barSize} activeBar={false}>
                       {differenceChartRows.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.difference > 0 ? "#0ea5e9" : "#ef4444"} />
                       ))}
@@ -596,7 +627,7 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
         </Card>
       )}
 
-      <Card>
+      <Card id="insights-detail">
         <CardHeader>
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -626,34 +657,32 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
                 return (
                   <div key={persona} className="space-y-2">
                     <h4 className="text-lg font-semibold">{persona}</h4>
-                    <div className="overflow-x-auto rounded-md border">
-                      <table className="w-full border-collapse">
-                        <thead>
-                          <tr className="bg-muted/40">
-                            <th className="border-b px-4 py-2 text-left">Feature</th>
-                            <th className="border-b px-4 py-2 text-right">Material Cost</th>
-                            <th className="border-b px-4 py-2 text-right">Perceived Value</th>
-                            <th className="border-b px-4 py-2 text-right">Net Score</th>
-                            <th className="border-b px-4 py-2 text-right">Value Ratio</th>
-                          </tr>
-                        </thead>
-                        <tbody>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Feature</TableHead>
+                          <TableHead className="text-right">Material Cost</TableHead>
+                          <TableHead className="text-right">Perceived Value</TableHead>
+                          <TableHead className="text-right">Net Score</TableHead>
+                          <TableHead className="text-right">Value Ratio</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
                           {[...personaResults]
                             .sort((a, b) => b.perceivedValue - a.perceivedValue)
                             .map((result) => (
-                              <tr key={result.featureId}>
-                                <td className="border-b px-4 py-2">{result.featureName}</td>
-                                <td className="border-b px-4 py-2 text-right">${result.materialCost.toFixed(2)}</td>
-                                <td className="border-b px-4 py-2 text-right">${result.perceivedValue.toFixed(2)}</td>
-                                <td className="border-b px-4 py-2 text-right">{result.netScore}</td>
-                                <td className="border-b px-4 py-2 text-right">
+                              <TableRow key={result.featureId}>
+                                <TableCell>{result.featureName}</TableCell>
+                                <TableCell className="text-right">${result.materialCost.toFixed(2)}</TableCell>
+                                <TableCell className="text-right">${result.perceivedValue.toFixed(2)}</TableCell>
+                                <TableCell className="text-right">{result.netScore}</TableCell>
+                                <TableCell className="text-right">
                                   {formatRatio(getValueRatio(result.perceivedValue, result.materialCost))}
-                                </td>
-                              </tr>
+                                </TableCell>
+                              </TableRow>
                             ))}
-                        </tbody>
-                      </table>
-                    </div>
+                      </TableBody>
+                    </Table>
                   </div>
                 );
               })}

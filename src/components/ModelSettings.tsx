@@ -83,7 +83,7 @@ export const ModelSettings = () => {
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline">Prices per 1M tokens</Badge>
             {serviceTier === 'flex' && (
-              <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20">
+              <Badge variant="selected">
                 Flex processing
               </Badge>
             )}
@@ -91,7 +91,7 @@ export const ModelSettings = () => {
         </div>
       </div>
 
-      <div className="rounded-lg border bg-muted/40 p-4">
+      <div className="rounded-lg border border-border-subtle bg-muted/25 p-4">
         <div className="grid gap-3 text-sm sm:grid-cols-3">
           <div className="space-y-1">
             <p className="text-muted-foreground">Input</p>

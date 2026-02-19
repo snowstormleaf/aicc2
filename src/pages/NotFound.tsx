@@ -1,5 +1,6 @@
-import { useLocation } from "react-router-dom";
 import { useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Link, useLocation } from "react-router-dom";
 
 const NotFound = () => {
   const location = useLocation();
@@ -12,13 +13,18 @@ const NotFound = () => {
   }, [location.pathname]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold mb-4">404</h1>
-        <p className="text-xl text-gray-600 mb-4">Oops! Page not found</p>
-        <a href="/" className="text-blue-500 hover:text-blue-700 underline">
-          Return to Home
-        </a>
+    <div className="page-shell flex min-h-screen items-center justify-center px-4">
+      <div className="section-frame w-full max-w-xl text-center">
+        <p className="type-caption">404</p>
+        <h1 className="type-headline mt-2">Page not found</h1>
+        <p className="type-deck mx-auto mt-3 content-measure">
+          The route <span className="type-mono">{location.pathname}</span> does not exist in this workspace.
+        </p>
+        <div className="mt-6">
+          <Button asChild>
+            <Link to="/">Return to Analysis Workflow</Link>
+          </Button>
+        </div>
       </div>
     </div>
   );

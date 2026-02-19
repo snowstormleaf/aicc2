@@ -1,12 +1,15 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { ArrowRight, BarChart3, Car, CheckCircle2, Upload, Users } from "lucide-react";
+
+import { PageHeader } from "@/components/layout/PageHeader";
+import { BurgerMenu } from "@/components/BurgerMenu";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { Badge } from "@/components/ui/badge";
 import { PersonaSelector } from "@/components/PersonaSelector";
 import { VehicleSelector } from "@/components/VehicleSelector";
 import { PerceivedValue } from "@/lib/maxdiff-engine";
-import { BurgerMenu } from "@/components/BurgerMenu";
-import { Car, Users, Upload, BarChart3, CheckCircle, ArrowRight } from "lucide-react";
 import type { MaxDiffCallLog } from "@/types/analysis";
 
 const FeatureUpload = lazy(() =>
@@ -26,9 +29,9 @@ interface Feature {
   materialCost: number;
 }
 
-type Step = 'persona' | 'vehicle' | 'upload' | 'analysis' | 'results';
+type Step = "persona" | "vehicle" | "upload" | "analysis" | "results";
 
-const WORKFLOW_SESSION_STORAGE_KEY = 'analysis_workflow_state';
+const WORKFLOW_SESSION_STORAGE_KEY = "analysis_workflow_state";
 
 type PersistedWorkflowState = {
   currentStep: Step;
@@ -45,20 +48,20 @@ const readPersistedWorkflowState = (): PersistedWorkflowState | null => {
     const raw = sessionStorage.getItem(WORKFLOW_SESSION_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<PersistedWorkflowState>;
-    if (!parsed || typeof parsed !== 'object') return null;
+    if (!parsed || typeof parsed !== "object") return null;
 
-    const validSteps: Step[] = ['persona', 'vehicle', 'upload', 'analysis', 'results'];
-    const step = validSteps.includes(parsed.currentStep as Step) ? (parsed.currentStep as Step) : 'persona';
-    const validWorkspaceTabs = ['config', 'design', 'filters'];
+    const validSteps: Step[] = ["persona", "vehicle", "upload", "analysis", "results"];
+    const step = validSteps.includes(parsed.currentStep as Step) ? (parsed.currentStep as Step) : "persona";
+    const validWorkspaceTabs = ["config", "design", "filters"];
     const workspaceTab =
-      typeof parsed.workspaceTab === 'string' && validWorkspaceTabs.includes(parsed.workspaceTab)
+      typeof parsed.workspaceTab === "string" && validWorkspaceTabs.includes(parsed.workspaceTab)
         ? parsed.workspaceTab
-        : 'config';
+        : "config";
 
     return {
       currentStep: step,
       selectedPersonas: Array.isArray(parsed.selectedPersonas) ? parsed.selectedPersonas : [],
-      selectedVehicle: typeof parsed.selectedVehicle === 'string' ? parsed.selectedVehicle : null,
+      selectedVehicle: typeof parsed.selectedVehicle === "string" ? parsed.selectedVehicle : null,
       features: Array.isArray(parsed.features) ? parsed.features : [],
       analysisResults: Array.isArray(parsed.analysisResults) ? parsed.analysisResults : null,
       callLogs: Array.isArray(parsed.callLogs) ? parsed.callLogs : [],
@@ -72,7 +75,7 @@ const readPersistedWorkflowState = (): PersistedWorkflowState | null => {
 const Index = () => {
   const [persistedState] = useState<PersistedWorkflowState | null>(() => readPersistedWorkflowState());
 
-  const [currentStep, setCurrentStep] = useState<Step>(persistedState?.currentStep ?? 'persona');
+  const [currentStep, setCurrentStep] = useState<Step>(persistedState?.currentStep ?? "persona");
   const [selectedPersonas, setSelectedPersonas] = useState<string[]>(persistedState?.selectedPersonas ?? []);
   const [selectedVehicle, setSelectedVehicle] = useState<string | null>(persistedState?.selectedVehicle ?? null);
   const [features, setFeatures] = useState<Feature[]>(persistedState?.features ?? []);
@@ -96,23 +99,32 @@ const Index = () => {
     sessionStorage.setItem(WORKFLOW_SESSION_STORAGE_KEY, JSON.stringify(serializable));
   }, [analysisResults, callLogs, currentStep, features, selectedPersonas, selectedVehicle, workspaceTab]);
 
-  const steps = [
-    { id: 'persona', label: 'Select Persona', icon: Users, description: 'Choose target buyer persona' },
-    { id: 'vehicle', label: 'Select Vehicle', icon: Car, description: 'Choose vehicle model' },
-    { id: 'upload', label: 'Upload Features', icon: Upload, description: 'Upload feature data CSV' },
-    { id: 'analysis', label: 'Run Analysis', icon: BarChart3, description: 'Execute MaxDiff analysis' },
-    { id: 'results', label: 'View Results', icon: CheckCircle, description: 'Review value analysis' },
-  ];
+  const steps = useMemo(
+    () => [
+      { id: "persona", label: "Select Persona", icon: Users, description: "Choose target buyer persona" },
+      { id: "vehicle", label: "Select Vehicle", icon: Car, description: "Choose vehicle model" },
+      { id: "upload", label: "Upload Features", icon: Upload, description: "Upload feature data CSV/XLSX" },
+      { id: "analysis", label: "Run Analysis", icon: BarChart3, description: "Execute MaxDiff analysis" },
+      { id: "results", label: "View Results", icon: CheckCircle2, description: "Review value outcomes" },
+    ],
+    []
+  );
 
-  const getStepIndex = (step: Step) => steps.findIndex(s => s.id === step);
+  const getStepIndex = (step: Step) => steps.findIndex((s) => s.id === step);
+
   const isStepComplete = (step: Step) => {
     switch (step) {
-      case 'persona': return selectedPersonas.length > 0;
-      case 'vehicle': return selectedVehicle !== null;
-      case 'upload': return features.length > 0;
-      case 'analysis': return analysisResults !== null;
-      case 'results': return analysisResults !== null;
-      default: return false;
+      case "persona":
+        return selectedPersonas.length > 0;
+      case "vehicle":
+        return selectedVehicle !== null;
+      case "upload":
+        return features.length > 0;
+      case "analysis":
+      case "results":
+        return analysisResults !== null;
+      default:
+        return false;
     }
   };
 
@@ -142,13 +154,13 @@ const Index = () => {
 
   const lazyFallback = (
     <Card className="p-6">
-      <p className="text-center text-muted-foreground">Loading step…</p>
+      <p className="text-center text-muted-foreground">Loading section...</p>
     </Card>
   );
 
   const renderCurrentStep = () => {
     switch (currentStep) {
-      case 'persona':
+      case "persona":
         return (
           <PersonaSelector
             selectedPersonas={selectedPersonas}
@@ -157,7 +169,7 @@ const Index = () => {
             }}
           />
         );
-      case 'vehicle':
+      case "vehicle":
         return (
           <VehicleSelector
             selectedVehicle={selectedVehicle}
@@ -166,7 +178,7 @@ const Index = () => {
             }}
           />
         );
-      case 'upload':
+      case "upload":
         return (
           <Suspense fallback={lazyFallback}>
             <FeatureUpload
@@ -179,7 +191,7 @@ const Index = () => {
             />
           </Suspense>
         );
-      case 'analysis':
+      case "analysis":
         return (
           <Suspense fallback={lazyFallback}>
             <MaxDiffAnalysis
@@ -189,22 +201,19 @@ const Index = () => {
               onAnalysisComplete={(results, logs) => {
                 setAnalysisResults(results);
                 setCallLogs(logs);
-                setCurrentStep('results');
+                setCurrentStep("results");
               }}
               onEditAnalysisParameters={() => {
-                setWorkspaceTab('design');
+                setWorkspaceTab("design");
                 setWorkspaceOpen(true);
               }}
             />
           </Suspense>
         );
-      case 'results':
+      case "results":
         return analysisResults ? (
           <Suspense fallback={lazyFallback}>
-            <ResultsVisualization
-              results={analysisResults}
-              callLogs={callLogs}
-            />
+            <ResultsVisualization results={analysisResults} callLogs={callLogs} />
           </Suspense>
         ) : null;
       default:
@@ -212,111 +221,124 @@ const Index = () => {
     }
   };
 
+  const currentStepIndex = getStepIndex(currentStep);
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background to-muted">
-      {/* Header */}
-      <div className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">AI Customer Clinic</h1>
-              <p className="text-sm text-muted-foreground">MaxDiff Tradeoff Analysis Platform</p>
-            </div>
-            <div className="flex items-center gap-3">
-              <BurgerMenu
-                open={workspaceOpen}
-                onOpenChange={setWorkspaceOpen}
-                activeTab={workspaceTab}
-                onTabChange={setWorkspaceTab}
-                featureCount={features.length}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
+    <div className="page-shell">
+      <PageHeader
+        actions={
+          <BurgerMenu
+            open={workspaceOpen}
+            onOpenChange={setWorkspaceOpen}
+            activeTab={workspaceTab}
+            onTabChange={setWorkspaceTab}
+            featureCount={features.length}
+          />
+        }
+      />
 
-      <div className="container mx-auto px-4 py-8">
-        {/* Progress Steps */}
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle className="text-lg">Analysis Workflow</CardTitle>
-            <CardDescription>Complete each step to perform your MaxDiff analysis</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center justify-between mb-4">
-              {steps.map((step, index) => {
-                const Icon = step.icon;
-                const isComplete = isStepComplete(step.id as Step);
-                const isCurrent = currentStep === step.id;
-                const canAccess = canProceedToStep(step.id as Step);
-
-                return (
-                  <div key={step.id} className="flex items-center">
-                    <button
-                      onClick={() => goToStep(step.id as Step)}
-                      disabled={!canAccess}
-                      className={`flex flex-col items-center p-3 rounded-lg transition-all ${
-                        isCurrent 
-                          ? 'bg-primary text-primary-foreground shadow-md' 
-                          : isComplete
-                          ? 'bg-data-positive text-white hover:bg-data-positive/90'
-                          : canAccess
-                          ? 'bg-muted hover:bg-muted/80 text-foreground'
-                          : 'bg-muted/50 text-muted-foreground cursor-not-allowed'
-                      }`}
-                    >
-                      <Icon className="h-5 w-5 mb-1" />
-                      <span className="text-xs font-medium">{step.label}</span>
-                    </button>
-                    
-                    {index < steps.length - 1 && (
-                      <ArrowRight className="h-4 w-4 mx-2 text-muted-foreground" />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            
-            <Progress 
-              value={(getStepIndex(currentStep) + 1) / steps.length * 100} 
-              className="h-2"
-            />
-            
-            <div className="mt-2 text-center">
-              <p className="text-sm text-muted-foreground">
-                Step {getStepIndex(currentStep) + 1} of {steps.length}: {steps[getStepIndex(currentStep)]?.description}
+      <main className="container mx-auto space-y-8 pb-16 pt-8">
+        <section id="workflow" className="section-frame space-y-5" aria-labelledby="workflow-title">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div className="space-y-2">
+              <h2 id="workflow-title" className="type-headline">
+                Analysis Workflow
+              </h2>
+              <p className="type-deck content-measure">
+                Complete each module in sequence. Completed modules are retained in this session.
               </p>
             </div>
-          </CardContent>
-        </Card>
+            <Badge variant="selected" className="h-fit">
+              Step {currentStepIndex + 1} of {steps.length}
+            </Badge>
+          </div>
 
-        {/* Current Step Content */}
-        <div className="mb-8">
+          <ol className="flex flex-col gap-3 lg:flex-row lg:items-stretch" aria-label="Workflow steps">
+            {steps.map((step, index) => {
+              const Icon = step.icon;
+              const isComplete = isStepComplete(step.id as Step);
+              const isCurrent = currentStep === step.id;
+              const canAccess = canProceedToStep(step.id as Step);
+              const statusLabel = isComplete ? "Completed" : isCurrent ? "In Progress" : "Pending";
+              const statusTone = isComplete
+                ? "text-primary"
+                : isCurrent
+                ? "text-foreground"
+                : "text-muted-foreground";
+
+              return (
+                <li key={step.id} className="flex items-stretch gap-2 lg:flex-1">
+                  <button
+                    type="button"
+                    onClick={() => goToStep(step.id as Step)}
+                    disabled={!canAccess}
+                    aria-current={isCurrent ? "step" : undefined}
+                    className={`flex h-full min-h-[170px] w-full flex-col rounded-lg border px-3 py-3 text-left transition-all duration-200 ${
+                      isCurrent
+                        ? "border-primary/40 bg-primary/10 shadow-subtle"
+                        : isComplete
+                        ? "border-primary/35 bg-primary/5 shadow-subtle"
+                        : canAccess
+                        ? "border-border-subtle bg-surface hover:border-border"
+                        : "cursor-not-allowed border-border-subtle bg-muted/45 opacity-70"
+                    }`}
+                  >
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border-subtle bg-background">
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      {isComplete ? (
+                        <Badge variant="selected" className="text-[10px] uppercase tracking-wide">
+                          Completed
+                        </Badge>
+                      ) : isCurrent ? (
+                        <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
+                          In Progress
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
+                          Step {index + 1}
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-sm font-semibold text-foreground">{step.label}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{step.description}</p>
+                    <p className={`mt-auto pt-3 inline-flex items-center gap-1 text-xs font-semibold ${statusTone}`}>
+                      <CheckCircle2 className={`h-3.5 w-3.5 ${isComplete ? "opacity-100" : "opacity-0"}`} />
+                      {statusLabel}
+                    </p>
+                  </button>
+                  {index < steps.length - 1 && (
+                    <ArrowRight
+                      className="hidden h-5 w-5 shrink-0 self-center text-muted-foreground lg:block"
+                      aria-hidden="true"
+                    />
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+
+          <Progress value={((currentStepIndex + 1) / steps.length) * 100} className="h-2" />
+        </section>
+
+        <section id="run-hub" aria-live="polite">
           {renderCurrentStep()}
-        </div>
+        </section>
 
-        {/* Navigation */}
-        {currentStep !== 'results' && (
+        {currentStep !== "results" && (
           <div className="flex justify-center">
-            <Button
-              onClick={nextStep}
-              disabled={!isStepComplete(currentStep)}
-              variant="analytics"
-              size="lg"
-            >
-              {currentStep === 'analysis' ? 'View Results' : 'Continue'}
-              <ArrowRight className="h-4 w-4 ml-2" />
+            <Button onClick={nextStep} disabled={!isStepComplete(currentStep)} variant="analytics" size="lg">
+              {currentStep === "analysis" ? "View Results" : "Continue"}
+              <ArrowRight className="h-4 w-4" />
             </Button>
           </div>
         )}
-      </div>
+      </main>
 
-      {/* Footer */}
-      <footer className="border-t mt-16 py-8 bg-card/30">
-        <div className="container mx-auto px-4 text-center">
-          <p className="text-sm text-muted-foreground">
-            AI Customer Clinic - Advanced MaxDiff Analysis for Automotive Features
-          </p>
+      <footer className="border-t border-border-subtle bg-surface py-8">
+        <div className="container mx-auto flex flex-col gap-2 text-center">
+          <p className="text-sm font-semibold text-foreground">AI Customer Clinic</p>
         </div>
       </footer>
     </div>
