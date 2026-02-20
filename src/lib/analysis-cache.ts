@@ -12,10 +12,11 @@ interface AnalysisCacheKeyParams {
   serviceTier: string;
   features: CacheFeatureInput[];
   algorithmVersion?: string;
+  analysisConfigFingerprint?: string;
 }
 
 const ANALYSIS_CACHE_PREFIX = "maxdiff";
-const DEFAULT_ALGORITHM_VERSION = "v2";
+const DEFAULT_ALGORITHM_VERSION = "v3";
 
 const fnv1a = (value: string) => {
   let hash = 0x811c9dc5;
@@ -50,6 +51,7 @@ export const buildAnalysisCacheKey = ({
   serviceTier,
   features,
   algorithmVersion = DEFAULT_ALGORITHM_VERSION,
+  analysisConfigFingerprint = "",
 }: AnalysisCacheKeyParams) => {
   const featureFingerprint = buildFeatureFingerprint(features);
   return [
@@ -60,5 +62,39 @@ export const buildAnalysisCacheKey = ({
     model,
     serviceTier,
     featureFingerprint,
+    analysisConfigFingerprint || "default",
+  ].join(":");
+};
+
+interface CalibrationCacheKeyParams {
+  vehicleId: string;
+  personaId: string;
+  featureId: string;
+  features: CacheFeatureInput[];
+  model: string;
+  serviceTier: string;
+  configFingerprint: string;
+}
+
+export const buildCalibrationCacheKey = ({
+  vehicleId,
+  personaId,
+  featureId,
+  features,
+  model,
+  serviceTier,
+  configFingerprint,
+}: CalibrationCacheKeyParams) => {
+  const featureFingerprint = buildFeatureFingerprint(features);
+  return [
+    ANALYSIS_CACHE_PREFIX,
+    "calibration",
+    vehicleId,
+    personaId,
+    featureId,
+    model,
+    serviceTier,
+    featureFingerprint,
+    configFingerprint,
   ].join(":");
 };

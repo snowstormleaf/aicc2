@@ -1,3 +1,10 @@
+import {
+  addRepeatTasks,
+  extendNearBIBDDesign,
+  generateNearBIBDDesign,
+  type MaxDiffDesignDiagnostics,
+} from "./design/maxdiffDesign.ts";
+
 export interface Feature {
   id: string;
   name: string;
@@ -20,6 +27,7 @@ export interface MaxDiffOption {
 export interface MaxDiffSet {
   id: string;
   options: MaxDiffOption[]; // typically 4 options
+  repeatOfSetId?: string;
 }
 
 export interface RawResponse {
@@ -27,7 +35,9 @@ export interface RawResponse {
   personaId: string;
   mostValued: string;
   leastValued: string;
-  ranking: string[]; // ids ordered from most to least
+  ranking?: string[]; // ids ordered from most to least
+  failed?: boolean;
+  failureReason?: string;
   debugTrace?: {
     request: Record<string, unknown>;
     response: Record<string, unknown>;
@@ -40,6 +50,126 @@ export interface PerceivedValue {
   materialCost: number;
   perceivedValue: number; // USD
   netScore: number; // raw score before scaling
+  utility?: number;
+  rawWtp?: number;
+  adjustedWtp?: number;
+  ciLower95?: number;
+  ciUpper95?: number;
+  bootstrapMean?: number;
+  bootstrapMedian?: number;
+  bootstrapCv?: number | null;
+  relativeCiWidth?: number | null;
+  calibrationLower?: number;
+  calibrationUpper?: number;
+  calibrationMid?: number;
+  adjustmentSource?: "model" | "scaled" | "calibrated_override";
+}
+
+export type DesignMode = "legacy" | "near_bibd";
+export type EstimatorMode = "legacy_score" | "bws_mnl_money";
+export type MoneyTransform = "log1p" | "linear";
+export type CalibrationAdjustmentStrategy = "global_scale" | "partial_override";
+
+export interface RepeatabilityMetrics {
+  totalRepeatPairs: number;
+  bestAgreementRate: number;
+  worstAgreementRate: number;
+  jointAgreementRate: number;
+}
+
+export interface BootstrapFeatureSummary {
+  mean: number;
+  median: number;
+  p2_5: number;
+  p97_5: number;
+  std: number;
+  cv: number | null;
+  relativeCiWidth: number | null;
+  samples: number;
+}
+
+export interface StabilityFeatureCheck {
+  featureId: string;
+  mean: number;
+  relativeHalfWidth: number | null;
+  pass: boolean;
+}
+
+export interface StabilityReport {
+  enabled: boolean;
+  targetRelativeHalfWidth: number;
+  topN: number;
+  maxTasks: number;
+  tasksUsed: number;
+  batchesAdded: number;
+  isStable: boolean;
+  checks: StabilityFeatureCheck[];
+}
+
+export interface CalibrationTraceStep {
+  step: number;
+  amount: number;
+  choice: "A" | "B";
+  phase: "bracket" | "search";
+}
+
+export interface CalibrationResult {
+  featureId: string;
+  featureName: string;
+  calibrationLower: number;
+  calibrationUpper: number;
+  calibrationMid: number;
+  stepsUsed: number;
+  transcript: CalibrationTraceStep[];
+}
+
+export interface FeatureEstimationSummary {
+  utility: number;
+  rawWtp: number;
+  adjustedWtp: number;
+  ciLower95: number;
+  ciUpper95: number;
+  bootstrap?: BootstrapFeatureSummary;
+  calibration?: CalibrationResult;
+  adjustmentSource: "model" | "scaled" | "calibrated_override";
+}
+
+export interface PersonaAnalysisSummary {
+  designMode: DesignMode;
+  estimator: EstimatorMode;
+  moneyTransform: MoneyTransform;
+  beta: number | null;
+  designDiagnostics: MaxDiffDesignDiagnostics | null;
+  repeatability: RepeatabilityMetrics;
+  failedTaskCount: number;
+  totalTaskCount: number;
+  failureRate: number;
+  bootstrapSamples: number;
+  stabilization?: StabilityReport;
+  calibration?: {
+    enabled: boolean;
+    strategy: CalibrationAdjustmentStrategy;
+    scaleFactor: number;
+    featureCount: number;
+    reusedFromCache: number;
+    results: CalibrationResult[];
+  };
+  features: Record<string, FeatureEstimationSummary>;
+}
+
+export interface GeneratedDesignPlan {
+  designMode: DesignMode;
+  maxDiffSets: MaxDiffSet[];
+  diagnostics: MaxDiffDesignDiagnostics | null;
+}
+
+export interface GenerateDesignOptions {
+  r?: number;
+  itemsPerSet?: number;
+  designMode?: DesignMode;
+  seed?: number;
+  repeatFraction?: number;
+  improvementIterations?: number;
 }
 
 export class MaxDiffEngine {
@@ -100,14 +230,29 @@ export class MaxDiffEngine {
    * This implementation produces `ceil((n * r) / k)` sets where k=4 by default.
    */
   static generateMaxDiffSets(features: Feature[], vouchers: Voucher[] = [], r: number = 3, itemsPerSet: number = 4): MaxDiffSet[] {
+    return this.generateMaxDiffPlan(features, vouchers, {
+      r,
+      itemsPerSet,
+      designMode: "legacy",
+    }).maxDiffSets;
+  }
+
+  private static buildOptionPool(features: Feature[], vouchers: Voucher[]) {
     const pool = features.map(f => ({ id: f.id, name: f.name, description: f.description }))
       // Also include voucher placeholders as additional options so LLM can see monetary references
       .concat(vouchers.map(v => ({ id: v.id, name: `Voucher (${v.amount})`, description: v.description })));
+    return pool;
+  }
 
+  private static generateLegacySets(
+    pool: Array<{ id: string; name: string; description?: string }>,
+    r: number,
+    itemsPerSet: number
+  ) {
     const totalItems = pool.length;
     const setsCount = Math.ceil((totalItems * r) / itemsPerSet);
 
-    // Simple round-robin distribution to ensure each item appears ~r times
+    // Simple round-robin distribution to ensure each item appears ~r times.
     const appearances: Record<string, number> = {};
     pool.forEach(p => appearances[p.id] = 0);
 
@@ -135,25 +280,85 @@ export class MaxDiffEngine {
     return sets;
   }
 
+  static generateMaxDiffPlan(
+    features: Feature[],
+    vouchers: Voucher[] = [],
+    options: GenerateDesignOptions = {}
+  ): GeneratedDesignPlan {
+    const pool = this.buildOptionPool(features, vouchers);
+    const items = pool.map((option) => option.id);
+    const lookup = new Map(pool.map((option) => [option.id, option]));
+    const r = Math.max(1, Math.floor(options.r ?? 3));
+    const itemsPerSet = Math.max(2, Math.min(Math.floor(options.itemsPerSet ?? 4), Math.max(2, items.length)));
+    const designMode: DesignMode = options.designMode ?? "near_bibd";
+    const seed = Number.isFinite(options.seed) ? Number(options.seed) : 42;
+
+    if (designMode === "legacy") {
+      const legacySets = this.generateLegacySets(pool, r, itemsPerSet);
+      const legacyBlocks = legacySets.map((set) => ({ id: set.id, itemIds: set.options.map((option) => option.id) }));
+      const diagnostics =
+        items.length >= 2
+          ? extendNearBIBDDesign(items, itemsPerSet, legacyBlocks, 0, seed).diagnostics
+          : null;
+      return {
+        designMode,
+        maxDiffSets: legacySets,
+        diagnostics,
+      };
+    }
+
+    const near = generateNearBIBDDesign(items, itemsPerSet, r, seed, {
+      improvementIterations: options.improvementIterations,
+    });
+    const withRepeats = addRepeatTasks(near.blocks, Math.max(0, options.repeatFraction ?? 0), seed + 17_129);
+    const diagnostics = extendNearBIBDDesign(items, itemsPerSet, withRepeats, 0, seed).diagnostics;
+
+    const maxDiffSets: MaxDiffSet[] = withRepeats.map((block) => ({
+      id: block.id,
+      repeatOfSetId: block.repeatOfSetId,
+      options: block.itemIds
+        .map((id) => lookup.get(id))
+        .filter(Boolean)
+        .map((option) => ({ id: option!.id, name: option!.name, description: option!.description })),
+    }));
+
+    return {
+      designMode,
+      maxDiffSets,
+      diagnostics,
+    };
+  }
+
   /**
    * Compute perceived monetary values for features from raw responses.
    * Uses a Borda-style scoring from the provided rankings and scales scores to USD
    */
   static computePerceivedValues(responses: RawResponse[], features: Feature[], vouchers: Voucher[] = []): PerceivedValue[] {
     const scoreMap: Record<string, number> = {};
-    const maxOptions = responses.reduce((m, r) => Math.max(m, r.ranking.length), 0);
+    const validResponses = responses.filter((response) => !response.failed);
 
     // Initialize scores
     features.forEach(f => scoreMap[f.id] = 0);
     vouchers.forEach(v => scoreMap[v.id] = 0);
 
-    // Borda count: highest rank gets (n-1) points, next (n-2), ...
-    for (const resp of responses) {
-      const n = resp.ranking.length;
-      for (let i = 0; i < resp.ranking.length; i++) {
-        const id = resp.ranking[i];
-        const points = Math.max(0, n - 1 - i);
-        scoreMap[id] = (scoreMap[id] || 0) + points;
+    // Legacy Borda count for full rankings; fallback to best/worst if only pair is available.
+    for (const resp of validResponses) {
+      const ranking = Array.isArray(resp.ranking) ? resp.ranking.filter((id) => typeof id === "string") : [];
+      if (ranking.length >= 3) {
+        const n = ranking.length;
+        for (let i = 0; i < ranking.length; i++) {
+          const id = ranking[i];
+          const points = Math.max(0, n - 1 - i);
+          scoreMap[id] = (scoreMap[id] || 0) + points;
+        }
+        continue;
+      }
+
+      if (resp.mostValued) {
+        scoreMap[resp.mostValued] = (scoreMap[resp.mostValued] || 0) + 1;
+      }
+      if (resp.leastValued) {
+        scoreMap[resp.leastValued] = (scoreMap[resp.leastValued] || 0) - 1;
       }
     }
 
@@ -169,7 +374,7 @@ export class MaxDiffEngine {
     // Compute perceived values
     const perceived: PerceivedValue[] = features.map(f => {
       const raw = scoreMap[f.id] || 0;
-      const normalized = raw / maxRawScore; // 0..1
+      const normalized = raw / maxRawScore; // roughly 0..1 in legacy flow
       // Perceived value = material cost + normalized * scale * adjustment
       const perceivedValue = f.materialCost + normalized * scale;
       return {

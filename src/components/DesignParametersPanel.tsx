@@ -7,6 +7,10 @@ import { Switch } from "@/components/ui/switch";
 import { calculateOptimalSets } from "@/lib/design-parameters";
 import { ModelSettings } from "@/components/ModelSettings";
 import {
+  analysisCalibrationStrategyOptions,
+  analysisDesignModeOptions,
+  analysisEstimatorOptions,
+  analysisMoneyTransformOptions,
   analysisRetryOptions,
   analysisTemperatureOptions,
   ANALYSIS_SETTINGS_UPDATED_EVENT,
@@ -22,6 +26,13 @@ interface DesignParametersPanelProps {
 export const DesignParametersPanel = ({ featureCount }: DesignParametersPanelProps) => {
   const designParams = calculateOptimalSets(featureCount);
   const [analysisSettings, setAnalysisSettings] = useState<AnalysisSettings>(getStoredAnalysisSettings());
+  const bootstrapOptions = [50, 100, 200, 400, 800];
+  const stabilityPercentOptions = [3, 5, 8, 10, 15];
+  const topNOptions = [3, 5, 8, 10];
+  const batchSizeOptions = [5, 10, 15, 20];
+  const maxTasksOptions = [40, 60, 80, 120, 160];
+  const calibrationFeatureOptions = [3, 5, 7, 10];
+  const calibrationStepOptions = [5, 7, 9, 11];
 
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
@@ -110,6 +121,122 @@ export const DesignParametersPanel = ({ featureCount }: DesignParametersPanelPro
             </div>
           </div>
 
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <div className="space-y-2">
+              <Label htmlFor="analysis-design-mode">Design mode</Label>
+              <Select
+                value={analysisSettings.designMode}
+                onValueChange={(value) => updateAnalysisSettings("designMode", value as AnalysisSettings["designMode"])}
+              >
+                <SelectTrigger id="analysis-design-mode">
+                  <SelectValue placeholder="Select design mode" />
+                </SelectTrigger>
+                <SelectContent>
+                  {analysisDesignModeOptions.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="analysis-estimator">Estimator</Label>
+              <Select
+                value={analysisSettings.estimator}
+                onValueChange={(value) => updateAnalysisSettings("estimator", value as AnalysisSettings["estimator"])}
+              >
+                <SelectTrigger id="analysis-estimator">
+                  <SelectValue placeholder="Select estimator" />
+                </SelectTrigger>
+                <SelectContent>
+                  {analysisEstimatorOptions.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="analysis-money-transform">Money transform</Label>
+              <Select
+                value={analysisSettings.moneyTransform}
+                onValueChange={(value) => updateAnalysisSettings("moneyTransform", value as AnalysisSettings["moneyTransform"])}
+              >
+                <SelectTrigger id="analysis-money-transform">
+                  <SelectValue placeholder="Select transform" />
+                </SelectTrigger>
+                <SelectContent>
+                  {analysisMoneyTransformOptions.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="analysis-bootstrap">Bootstrap samples</Label>
+              <Select
+                value={String(analysisSettings.bootstrapSamples)}
+                onValueChange={(value) => updateAnalysisSettings("bootstrapSamples", Number(value))}
+              >
+                <SelectTrigger id="analysis-bootstrap">
+                  <SelectValue placeholder="Select samples" />
+                </SelectTrigger>
+                <SelectContent>
+                  {bootstrapOptions.map((value) => (
+                    <SelectItem key={value} value={String(value)}>
+                      {value}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="analysis-seed">Design seed</Label>
+              <Select
+                value={String(analysisSettings.designSeed)}
+                onValueChange={(value) => updateAnalysisSettings("designSeed", Number(value))}
+              >
+                <SelectTrigger id="analysis-seed">
+                  <SelectValue placeholder="Select seed" />
+                </SelectTrigger>
+                <SelectContent>
+                  {[42, 101, 313, 777, 2026].map((value) => (
+                    <SelectItem key={value} value={String(value)}>
+                      {value}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="analysis-repeat-fraction">Repeat task fraction</Label>
+              <Select
+                value={String(analysisSettings.repeatTaskFraction)}
+                onValueChange={(value) => updateAnalysisSettings("repeatTaskFraction", Number(value))}
+              >
+                <SelectTrigger id="analysis-repeat-fraction">
+                  <SelectValue placeholder="Select repeat share" />
+                </SelectTrigger>
+                <SelectContent>
+                  {[0, 0.05, 0.1, 0.15, 0.2].map((value) => (
+                    <SelectItem key={value} value={String(value)}>
+                      {(value * 100).toFixed(0)}%
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
           <div className="space-y-3 rounded-md border border-border-subtle bg-muted/10 p-3">
             <div className="rounded-md bg-muted/40 p-3">
               <div>
@@ -166,6 +293,170 @@ export const DesignParametersPanel = ({ featureCount }: DesignParametersPanelPro
                 onCheckedChange={(checked) => updateAnalysisSettings("showProgressUpdates", checked)}
               />
             </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">Stabilize to target CI width</p>
+                <p className="text-xs text-muted-foreground">
+                  Automatically add task batches until top-feature uncertainty target is reached or max tasks is hit.
+                </p>
+              </div>
+              <Switch
+                checked={analysisSettings.stabilizeToTarget}
+                onCheckedChange={(checked) => updateAnalysisSettings("stabilizeToTarget", checked)}
+              />
+            </div>
+
+            {analysisSettings.stabilizeToTarget && (
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <div className="space-y-2">
+                  <Label htmlFor="analysis-stability-target">Target ±%</Label>
+                  <Select
+                    value={String(analysisSettings.stabilityTargetPercent)}
+                    onValueChange={(value) => updateAnalysisSettings("stabilityTargetPercent", Number(value))}
+                  >
+                    <SelectTrigger id="analysis-stability-target">
+                      <SelectValue placeholder="Select target %" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {stabilityPercentOptions.map((value) => (
+                        <SelectItem key={value} value={String(value)}>
+                          ±{value}%
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="analysis-stability-topn">Top N features</Label>
+                  <Select
+                    value={String(analysisSettings.stabilityTopN)}
+                    onValueChange={(value) => updateAnalysisSettings("stabilityTopN", Number(value))}
+                  >
+                    <SelectTrigger id="analysis-stability-topn">
+                      <SelectValue placeholder="Select top N" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {topNOptions.map((value) => (
+                        <SelectItem key={value} value={String(value)}>
+                          {value}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="analysis-stability-batch">Batch size</Label>
+                  <Select
+                    value={String(analysisSettings.stabilityBatchSize)}
+                    onValueChange={(value) => updateAnalysisSettings("stabilityBatchSize", Number(value))}
+                  >
+                    <SelectTrigger id="analysis-stability-batch">
+                      <SelectValue placeholder="Select batch size" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {batchSizeOptions.map((value) => (
+                        <SelectItem key={value} value={String(value)}>
+                          {value}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="analysis-stability-max">Max tasks</Label>
+                  <Select
+                    value={String(analysisSettings.stabilityMaxTasks)}
+                    onValueChange={(value) => updateAnalysisSettings("stabilityMaxTasks", Number(value))}
+                  >
+                    <SelectTrigger id="analysis-stability-max">
+                      <SelectValue placeholder="Select max tasks" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {maxTasksOptions.map((value) => (
+                        <SelectItem key={value} value={String(value)}>
+                          {value}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">Enable calibration layer</p>
+                <p className="text-xs text-muted-foreground">
+                  Run feature-vs-cash indifference search and apply WTP correction.
+                </p>
+              </div>
+              <Switch
+                checked={analysisSettings.enableCalibration}
+                onCheckedChange={(checked) => updateAnalysisSettings("enableCalibration", checked)}
+              />
+            </div>
+
+            {analysisSettings.enableCalibration && (
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-2">
+                  <Label htmlFor="analysis-calibration-count">Features to calibrate</Label>
+                  <Select
+                    value={String(analysisSettings.calibrationFeatureCount)}
+                    onValueChange={(value) => updateAnalysisSettings("calibrationFeatureCount", Number(value))}
+                  >
+                    <SelectTrigger id="analysis-calibration-count">
+                      <SelectValue placeholder="Select feature count" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {calibrationFeatureOptions.map((value) => (
+                        <SelectItem key={value} value={String(value)}>
+                          {value}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="analysis-calibration-steps">Steps per feature</Label>
+                  <Select
+                    value={String(analysisSettings.calibrationSteps)}
+                    onValueChange={(value) => updateAnalysisSettings("calibrationSteps", Number(value))}
+                  >
+                    <SelectTrigger id="analysis-calibration-steps">
+                      <SelectValue placeholder="Select steps" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {calibrationStepOptions.map((value) => (
+                        <SelectItem key={value} value={String(value)}>
+                          {value}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="analysis-calibration-strategy">Adjustment strategy</Label>
+                  <Select
+                    value={analysisSettings.calibrationStrategy}
+                    onValueChange={(value) =>
+                      updateAnalysisSettings("calibrationStrategy", value as AnalysisSettings["calibrationStrategy"])
+                    }
+                  >
+                    <SelectTrigger id="analysis-calibration-strategy">
+                      <SelectValue placeholder="Select strategy" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {analysisCalibrationStrategyOptions.map((item) => (
+                        <SelectItem key={item.value} value={item.value}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
 
             <div className="flex items-center justify-between gap-3">
               <div>

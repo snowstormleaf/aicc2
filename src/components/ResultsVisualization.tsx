@@ -19,9 +19,9 @@ import {
   Legend,
 } from "recharts";
 import type { TooltipProps } from "recharts";
-import { TrendingUp, Download, FileSpreadsheet, ChevronDown, ChevronUp } from "lucide-react";
+import { TrendingUp, Download, FileSpreadsheet, FileJson, ChevronDown, ChevronUp } from "lucide-react";
 
-import { PerceivedValue } from "@/lib/maxdiff-engine";
+import { PerceivedValue, type PersonaAnalysisSummary } from "@/lib/maxdiff-engine";
 import type { MaxDiffCallLog } from "@/types/analysis";
 import { createXlsxBlob } from "@/lib/xlsx-utils";
 import { classifyValueRatio, formatRatio, getValueRatio } from "@/lib/value-metrics";
@@ -34,6 +34,7 @@ import {
 interface ResultsVisualizationProps {
   results: Map<string, PerceivedValue[]>;
   callLogs: MaxDiffCallLog[];
+  summaries: Map<string, PersonaAnalysisSummary>;
 }
 
 type ScatterPoint = {
@@ -72,7 +73,7 @@ const getNiceAxisMax = (value: number) => {
   return step * magnitude;
 };
 
-export const ResultsVisualization = ({ results, callLogs }: ResultsVisualizationProps) => {
+export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVisualizationProps) => {
   const [showDetails, setShowDetails] = useState(false);
   const [hideMaterialCost, setHideMaterialCost] = useState(() => getStoredAnalysisSettings().hideMaterialCost);
   const [parityPercent, setParityPercent] = useState<number[]>([100]);
@@ -248,18 +249,50 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
   }, [differenceChartRows]);
 
   const downloadResults = () => {
-    let csvContent = "Persona,Feature Name,Description,Material Cost (USD),Perceived Value (USD),Value Ratio,Category\n";
+    let csvContent =
+      "Persona,Feature ID,Feature Name,Material Cost (USD),Perceived Value (USD),Raw Model WTP (USD),Adjusted WTP (USD),Utility,CI 2.5%,CI 97.5%,Bootstrap Mean,Bootstrap Median,Bootstrap CV,Relative CI Width,Adjustment Source,Calibration Mid,Calibration Lower,Calibration Upper,Beta,Transform,Estimator,Design Mode,Repeatability Joint,Failure Rate,Design Item CV,Design Pair CV,Pair Coverage,Calibration Strategy,Calibration Scale,Value Ratio,Category\n";
 
     for (const [persona, perceivedValues] of results.entries()) {
+      const summary = summaries.get(persona);
       csvContent +=
         perceivedValues
           .map((r) => {
             const ratio = getValueRatio(r.perceivedValue, r.materialCost);
             const category = classifyValueRatio(ratio);
             const ratioLabel = ratio == null ? "N/A" : ratio.toFixed(2);
-            return `"${persona}","${r.featureName}","Feature ${r.featureId}",${r.materialCost},${r.perceivedValue.toFixed(
-              2
-            )},${ratioLabel},${category}`;
+            return [
+              `"${persona}"`,
+              `"${r.featureId}"`,
+              `"${r.featureName}"`,
+              Number(r.materialCost.toFixed(2)),
+              Number(r.perceivedValue.toFixed(2)),
+              r.rawWtp != null ? Number(r.rawWtp.toFixed(2)) : "",
+              r.adjustedWtp != null ? Number(r.adjustedWtp.toFixed(2)) : "",
+              r.utility != null ? Number(r.utility.toFixed(6)) : "",
+              r.ciLower95 != null ? Number(r.ciLower95.toFixed(2)) : "",
+              r.ciUpper95 != null ? Number(r.ciUpper95.toFixed(2)) : "",
+              r.bootstrapMean != null ? Number(r.bootstrapMean.toFixed(2)) : "",
+              r.bootstrapMedian != null ? Number(r.bootstrapMedian.toFixed(2)) : "",
+              r.bootstrapCv != null ? Number((r.bootstrapCv ?? 0).toFixed(4)) : "",
+              r.relativeCiWidth != null ? Number((r.relativeCiWidth ?? 0).toFixed(4)) : "",
+              `"${r.adjustmentSource ?? ""}"`,
+              r.calibrationMid != null ? Number(r.calibrationMid.toFixed(2)) : "",
+              r.calibrationLower != null ? Number(r.calibrationLower.toFixed(2)) : "",
+              r.calibrationUpper != null ? Number(r.calibrationUpper.toFixed(2)) : "",
+              summary?.beta != null ? Number(summary.beta.toFixed(6)) : "",
+              `"${summary?.moneyTransform ?? ""}"`,
+              `"${summary?.estimator ?? ""}"`,
+              `"${summary?.designMode ?? ""}"`,
+              summary?.repeatability ? Number(summary.repeatability.jointAgreementRate.toFixed(4)) : "",
+              summary?.failureRate != null ? Number(summary.failureRate.toFixed(4)) : "",
+              summary?.designDiagnostics ? Number(summary.designDiagnostics.itemSummary.cv.toFixed(4)) : "",
+              summary?.designDiagnostics ? Number(summary.designDiagnostics.pairSummary.observedPairs.cv.toFixed(4)) : "",
+              summary?.designDiagnostics ? Number(summary.designDiagnostics.pairSummary.coverage.toFixed(4)) : "",
+              `"${summary?.calibration?.strategy ?? ""}"`,
+              summary?.calibration ? Number(summary.calibration.scaleFactor.toFixed(6)) : "",
+              ratioLabel,
+              category,
+            ].join(",");
           })
           .join("\n") + "\n";
     }
@@ -274,13 +307,37 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
   };
 
   const downloadExcel = () => {
-    const resultsRows: (string | number)[][] = [["Feature", "Material cost", "Value", "Persona"]];
+    const resultsRows: (string | number)[][] = [
+      [
+        "Feature",
+        "Feature ID",
+        "Material cost",
+        "Perceived value",
+        "Raw model WTP",
+        "Adjusted WTP",
+        "Utility",
+        "CI low",
+        "CI high",
+        "Persona",
+      ],
+    ];
 
     personas.forEach((persona) => {
       const personaResults = results.get(persona) ?? [];
       const sortedResults = [...personaResults].sort((a, b) => b.perceivedValue - a.perceivedValue);
       sortedResults.forEach((result) => {
-        resultsRows.push([result.featureName, result.materialCost, result.perceivedValue, persona]);
+        resultsRows.push([
+          result.featureName,
+          result.featureId,
+          result.materialCost,
+          result.perceivedValue,
+          result.rawWtp ?? "",
+          result.adjustedWtp ?? "",
+          result.utility ?? "",
+          result.ciLower95 ?? "",
+          result.ciUpper95 ?? "",
+          persona,
+        ]);
       });
     });
 
@@ -316,14 +373,67 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
       ]);
     });
 
+    const summaryRows: (string | number)[][] = [
+      [
+        "Persona",
+        "Estimator",
+        "Money transform",
+        "Beta",
+        "Repeatability joint",
+        "Failure rate",
+        "Design mode",
+        "Item CV",
+        "Pair CV",
+        "Pair coverage",
+        "Calibration enabled",
+        "Calibration strategy",
+        "Calibration scale",
+      ],
+    ];
+    personas.forEach((persona) => {
+      const summary = summaries.get(persona);
+      summaryRows.push([
+        persona,
+        summary?.estimator ?? "",
+        summary?.moneyTransform ?? "",
+        summary?.beta ?? "",
+        summary?.repeatability?.jointAgreementRate ?? "",
+        summary?.failureRate ?? "",
+        summary?.designMode ?? "",
+        summary?.designDiagnostics?.itemSummary.cv ?? "",
+        summary?.designDiagnostics?.pairSummary.observedPairs.cv ?? "",
+        summary?.designDiagnostics?.pairSummary.coverage ?? "",
+        summary?.calibration?.enabled ? "yes" : "no",
+        summary?.calibration?.strategy ?? "",
+        summary?.calibration?.scaleFactor ?? "",
+      ]);
+    });
+
     const blob = createXlsxBlob([
       { name: "Results", rows: resultsRows },
+      { name: "Method summary", rows: summaryRows },
       { name: "MaxDiff API Calls", rows: callsRows },
     ]);
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
     anchor.download = "maxdiff-analysis.xlsx";
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadJson = () => {
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      results: Object.fromEntries(results.entries()),
+      summaries: Object.fromEntries(summaries.entries()),
+      callLogs,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "maxdiff-analysis-results.json";
     anchor.click();
     URL.revokeObjectURL(url);
   };
@@ -413,6 +523,10 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
                 <Download className="mr-2 h-4 w-4" />
                 Export CSV
               </Button>
+              <Button onClick={downloadJson} variant="outline" size="sm">
+                <FileJson className="mr-2 h-4 w-4" />
+                Export JSON
+              </Button>
               <Button onClick={downloadExcel} variant="analytics" size="sm">
                 <FileSpreadsheet className="mr-2 h-4 w-4" />
                 Download Excel
@@ -421,6 +535,42 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
           </div>
         </CardHeader>
         <CardContent>
+          {personas.length > 0 && (
+            <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {personas.map((persona) => {
+                const summary = summaries.get(persona);
+                const stability = summary?.stabilization;
+                return (
+                  <div key={`${persona}-summary`} className="rounded-md border border-border-subtle bg-background/70 p-3 text-xs">
+                    <p className="mb-1 font-semibold text-foreground">{persona}</p>
+                    <p className="text-muted-foreground">
+                      {summary?.estimator ?? "n/a"} · {summary?.moneyTransform ?? "n/a"} · β{" "}
+                      {summary?.beta != null ? summary.beta.toFixed(4) : "n/a"}
+                    </p>
+                    <p className="text-muted-foreground">
+                      Repeatability {((summary?.repeatability?.jointAgreementRate ?? 0) * 100).toFixed(1)}% · Failure{" "}
+                      {((summary?.failureRate ?? 0) * 100).toFixed(1)}%
+                    </p>
+                    <p className="text-muted-foreground">
+                      Pair coverage {((summary?.designDiagnostics?.pairSummary.coverage ?? 0) * 100).toFixed(1)}% · Item CV{" "}
+                      {((summary?.designDiagnostics?.itemSummary.cv ?? 0) * 100).toFixed(1)}%
+                    </p>
+                    {stability && (
+                      <p className="text-muted-foreground">
+                        Stability {stability.isStable ? "pass" : "not reached"} · tasks {stability.tasksUsed}/
+                        {stability.maxTasks}
+                      </p>
+                    )}
+                    {summary?.calibration?.enabled && (
+                      <p className="text-muted-foreground">
+                        Calibration {summary.calibration.strategy} · scale {summary.calibration.scaleFactor.toFixed(3)}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {!hideMaterialCost ? (
             <>
               <div className="h-[420px] w-full overflow-hidden rounded-md border border-border-subtle bg-background/60 p-3">
@@ -662,8 +812,10 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
                         <TableRow>
                           <TableHead>Feature</TableHead>
                           <TableHead className="text-right">Material Cost</TableHead>
-                          <TableHead className="text-right">Perceived Value</TableHead>
-                          <TableHead className="text-right">Net Score</TableHead>
+                          <TableHead className="text-right">Perceived / Adjusted WTP</TableHead>
+                          <TableHead className="text-right">Raw Model WTP</TableHead>
+                          <TableHead className="text-right">Utility</TableHead>
+                          <TableHead className="text-right">95% CI</TableHead>
                           <TableHead className="text-right">Value Ratio</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -675,7 +827,17 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
                                 <TableCell>{result.featureName}</TableCell>
                                 <TableCell className="text-right">${result.materialCost.toFixed(2)}</TableCell>
                                 <TableCell className="text-right">${result.perceivedValue.toFixed(2)}</TableCell>
-                                <TableCell className="text-right">{result.netScore}</TableCell>
+                                <TableCell className="text-right">
+                                  {result.rawWtp != null ? `$${result.rawWtp.toFixed(2)}` : "—"}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  {result.utility != null ? result.utility.toFixed(4) : result.netScore.toFixed(2)}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  {result.ciLower95 != null && result.ciUpper95 != null
+                                    ? `$${result.ciLower95.toFixed(2)} to $${result.ciUpper95.toFixed(2)}`
+                                    : "—"}
+                                </TableCell>
                                 <TableCell className="text-right">
                                   {formatRatio(getValueRatio(result.perceivedValue, result.materialCost))}
                                 </TableCell>

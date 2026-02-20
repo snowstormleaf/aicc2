@@ -1,3 +1,5 @@
+import type { PerceivedValue, PersonaAnalysisSummary } from "@/domain/analysis/engine";
+
 export interface MaxDiffCallLog {
   id: string;
   timestamp: string;
@@ -11,4 +13,9 @@ export interface MaxDiffCallLog {
   request?: string;
   response?: string;
   error?: string;
+}
+
+export interface PersonaAnalysisResult {
+  perceivedValues: PerceivedValue[];
+  summary: PersonaAnalysisSummary;
 }

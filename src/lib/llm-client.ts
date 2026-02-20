@@ -1,4 +1,4 @@
-import { Feature, Voucher, MaxDiffSet, RawResponse } from './maxdiff-engine';
+import { MaxDiffSet, RawResponse } from './maxdiff-engine';
 
 export interface LLMConfig {
   model?: string;
@@ -19,6 +19,7 @@ export interface VoucherBounds {
 export interface PersonaProfile {
   id: string;
   name: string;
+  summary?: string;
   attributes: Record<string, string>;
   demographics: {
     age: string;
@@ -46,6 +47,7 @@ Respond with **pure JSON only**, for example:
 };
 
 export const buildSystemPrompt = (persona: PersonaProfile): string => {
+  const summaryBlock = persona.summary ? `\nPERSONA SUMMARY:\n${persona.summary}\n` : "";
   return `You are a ${persona.name} persona with the following characteristics:
 
 DEMOGRAPHICS:
@@ -62,6 +64,7 @@ ${persona.painPoints.map(p => `- ${p}`).join('\n')}
 
 BUYING BEHAVIOR:
 ${persona.buyingBehavior.map(b => `- ${b}`).join('\n')}
+${summaryBlock}
 
 INSTRUCTIONS:
 - Think and respond ONLY as this persona
@@ -70,65 +73,87 @@ INSTRUCTIONS:
 - Do NOT reveal your thought process or mention that you are an AI
 - Be consistent with your persona's characteristics throughout
 - Focus on practical value from your persona's perspective
-
-CRITICAL: You must use the rank_value function to provide your response. Do not provide explanations outside the function call.`;
+- For MaxDiff choice tasks, output strict JSON only when asked.`;
 };
 
 export const buildUserPrompt = (
   set: MaxDiffSet,
-  vehicle: { brand: string; name: string },
+  vehicle: { brand: string; name: string; description?: string },
   featureDescriptions: Map<string, string>,
-  persona: Pick<PersonaProfile, 'name' | 'id'>
+  persona: Pick<PersonaProfile, 'name' | 'id' | 'summary'>,
+  mode: 'default' | 'json_only' | 'minimal' = 'default'
 ): string => {
+  if (mode === 'minimal') {
+    const ids = set.options.map((option) => option.id).join(', ');
+    return `Return JSON only: {"best":"<id>","worst":"<id>"}.
+Set ${set.id} option IDs: ${ids}`;
+  }
+
   const optionsText = set.options.map((option, index) => {
     const description = featureDescriptions.get(option.id) || option.description || 'No description available';
     return `${index + 1}. ${option.name} (ID: ${option.id})
    ${description}`;
   }).join('\n\n');
 
-  return `You are considering purchasing a ${vehicle.brand} ${vehicle.name} and need to evaluate these 4 options:
+  const personaSummary = persona.summary
+    ? `Persona summary: ${persona.summary}`
+    : `Persona summary: ${persona.name} evaluating value and affordability tradeoffs.`;
+  const vehicleContext = vehicle.description
+    ? `${vehicle.brand} ${vehicle.name}. Context: ${vehicle.description}`
+    : `${vehicle.brand} ${vehicle.name}`;
+  const jsonOnlyReminder =
+    mode === 'json_only'
+      ? '\nCRITICAL: Return JSON only, no markdown, no prose, no code fences.'
+      : '';
+
+  return `You are ${persona.name}. ${personaSummary}
+Vehicle context: ${vehicleContext}
+Baseline: all other vehicle attributes remain fixed; only one option below is selected.
+
+Evaluate these 4 options:
 
 ${optionsText}
 
-As ${persona.name}, please rank these options from MOST valuable to LEAST valuable to you personally.
+If an option is monetary, interpret it as a PRICE REDUCTION on purchase price (not a gift card, not free cash).
+Choose:
+- "best": the single most valuable option for you.
+- "worst": the single least valuable option for you.
 
-Consider:
-- Which option would be most important for your specific needs?
-- Which option would you be least willing to pay extra for?
-- How do these options align with your priorities and budget?
-
-Use the rank_value function to provide:
-1. most_valued: The ID of your most preferred option
-2. least_valued: The ID of your least preferred option
-3. ranking: All 4 option IDs ordered from most to least valuable`;
+Respond with strict JSON only:
+{"best":"<option_id>","worst":"<option_id>"}
+${jsonOnlyReminder}`;
 };
 
-const RANK_VALUE_TOOL = {
-  type: 'function',
-  name: 'rank_value',
-  description: 'Rank the options from most to least valuable',
-  parameters: {
-    type: 'object',
-    properties: {
-      most_valued: {
-        type: 'string',
-        description: 'ID of the most valuable option'
-      },
-      least_valued: {
-        type: 'string',
-        description: 'ID of the least valuable option'
-      },
-      ranking: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Complete ranking from most to least valuable (IDs)'
-      }
-    },
-    required: ['most_valued', 'least_valued', 'ranking'],
-    additionalProperties: false
-  },
-  strict: true
-} as const;
+export const buildCalibrationPrompt = (params: {
+  featureId: string;
+  featureName: string;
+  featureDescription?: string;
+  amount: number;
+  vehicle: { brand: string; name: string; description?: string };
+  persona: Pick<PersonaProfile, 'name' | 'summary'>;
+}): string => {
+  const featureText = params.featureDescription?.trim()
+    ? `${params.featureName} (${params.featureId}): ${params.featureDescription}`
+    : `${params.featureName} (${params.featureId})`;
+  const personaSummary = params.persona.summary
+    ? `${params.persona.name}. ${params.persona.summary}`
+    : params.persona.name;
+  const vehicleText = params.vehicle.description
+    ? `${params.vehicle.brand} ${params.vehicle.name} (${params.vehicle.description})`
+    : `${params.vehicle.brand} ${params.vehicle.name}`;
+  const amount = Math.max(0, Number(params.amount));
+
+  return `Persona: ${personaSummary}
+Vehicle context: ${vehicleText}
+Baseline fixed: all other features and conditions remain unchanged.
+
+Choose exactly one option:
+A) Add this feature: ${featureText}
+B) Receive a $${amount.toFixed(2)} PRICE REDUCTION on the vehicle purchase price.
+
+Respond with strict JSON only:
+{"choice":"A"} or {"choice":"B"}`;
+};
 
 const extractJsonPayload = (raw: string): Record<string, unknown> | null => {
   if (!raw) return null;
@@ -141,47 +166,48 @@ const extractJsonPayload = (raw: string): Record<string, unknown> | null => {
   }
 };
 
-const parseRankArgs = (rawArgs: unknown): Record<string, unknown> => {
-  if (!rawArgs) return {};
-  if (typeof rawArgs === 'string') {
-    const parsed = extractJsonPayload(rawArgs);
-    if (parsed && typeof parsed === 'object') {
-      return parsed.arguments && typeof parsed.arguments === 'object'
-        ? (parsed.arguments as Record<string, unknown>)
-        : parsed;
-    }
-    return {};
+const parseJsonLike = (rawValue: unknown): Record<string, unknown> => {
+  if (!rawValue) return {};
+  if (typeof rawValue === 'string') {
+    return extractJsonPayload(rawValue) ?? {};
   }
-  if (typeof rawArgs === 'object') {
-    const parsed = rawArgs as Record<string, unknown>;
-    return parsed.arguments && typeof parsed.arguments === 'object'
-      ? (parsed.arguments as Record<string, unknown>)
-      : parsed;
+  if (typeof rawValue === 'object') {
+    return rawValue as Record<string, unknown>;
   }
   return {};
 };
 
-const extractToolArgumentsFromResponse = (response: Record<string, unknown>): Record<string, unknown> => {
+const extractStructuredPayloadFromResponse = (response: Record<string, unknown>): Record<string, unknown> => {
+  const outputText = extractOutputText(response);
+  const parsedText = extractJsonPayload(outputText);
+  if (parsedText) return parsedText;
+
   const output = response.output;
   if (Array.isArray(output)) {
     for (const item of output) {
       if (!item || typeof item !== 'object') continue;
       const typedItem = item as Record<string, unknown>;
       const type = typedItem.type;
-      if ((type === 'tool_call' || type === 'function_call') && typedItem.name === 'rank_value') {
-        return parseRankArgs(typedItem.arguments);
+      if (type === 'tool_call' || type === 'function_call') {
+        const fromArgs = parseJsonLike(typedItem.arguments);
+        if (Object.keys(fromArgs).length > 0) {
+          return fromArgs.arguments && typeof fromArgs.arguments === 'object'
+            ? (fromArgs.arguments as Record<string, unknown>)
+            : fromArgs;
+        }
       }
       if (typedItem.tool_call && typeof typedItem.tool_call === 'object') {
         const toolCall = typedItem.tool_call as Record<string, unknown>;
-        if (toolCall.name === 'rank_value') {
-          return parseRankArgs(toolCall.arguments);
+        const fromArgs = parseJsonLike(toolCall.arguments);
+        if (Object.keys(fromArgs).length > 0) {
+          return fromArgs.arguments && typeof fromArgs.arguments === 'object'
+            ? (fromArgs.arguments as Record<string, unknown>)
+            : fromArgs;
         }
       }
     }
   }
-  if (typeof response.output_text === 'string') {
-    return parseRankArgs(response.output_text);
-  }
+
   return {};
 };
 
@@ -227,18 +253,29 @@ const mapServiceTier = (serviceTier?: 'standard' | 'flex'): string | undefined =
 
 const apiBaseUrl = import.meta.env?.VITE_API_URL || 'http://localhost:3001/api';
 
-const parseRankValuePayload = (payload: Record<string, unknown>) => {
-  const most = payload.most_valued ?? payload.mostValued ?? payload.most;
-  const least = payload.least_valued ?? payload.leastValued ?? payload.least;
-  const ranking = payload.ranking;
+const parseBestWorstPayload = (payload: Record<string, unknown>) => {
+  const best = payload.best ?? payload.most_valued ?? payload.mostValued ?? payload.most;
+  const worst = payload.worst ?? payload.least_valued ?? payload.leastValued ?? payload.least;
 
-  if (typeof most !== 'string' || typeof least !== 'string') {
-    throw new Error(`Missing keys in model output: ${JSON.stringify(payload)}`);
+  if (typeof best !== 'string' || typeof worst !== 'string') {
+    throw new Error(`Missing best/worst keys in model output: ${JSON.stringify(payload)}`);
   }
-  if (!Array.isArray(ranking) || !ranking.every(item => typeof item === 'string')) {
-    throw new Error(`Ranking must be a list of strings: ${JSON.stringify(payload)}`);
+  if (!best.trim() || !worst.trim()) {
+    throw new Error(`best/worst must be non-empty strings: ${JSON.stringify(payload)}`);
   }
-  return { mostValued: most, leastValued: least, ranking };
+
+  return {
+    best: best.trim(),
+    worst: worst.trim(),
+  };
+};
+
+const parseFeatureCashPayload = (payload: Record<string, unknown>) => {
+  const choice = payload.choice;
+  if (choice !== "A" && choice !== "B") {
+    throw new Error(`Expected {"choice":"A"|"B"}, received: ${JSON.stringify(payload)}`);
+  }
+  return { choice };
 };
 
 export class LLMClient {
@@ -250,7 +287,7 @@ export class LLMClient {
       reasoningModel: 'o4-mini-2025-04-16',
       serviceTier: 'standard',
       maxRetries: 3,
-      temperature: 0.2,
+      temperature: 0,
       useGPT: true,
       ...config
     };
@@ -323,11 +360,10 @@ export class LLMClient {
   async rankOptions(
     set: MaxDiffSet,
     persona: PersonaProfile,
-    vehicle: { brand: string; name: string },
+    vehicle: { brand: string; name: string; description?: string },
     featureDescriptions: Map<string, string>
   ): Promise<RawResponse> {
     const systemPrompt = buildSystemPrompt(persona);
-    const userPrompt = buildUserPrompt(set, vehicle, featureDescriptions, persona);
     const model = this.config.model ?? 'gpt-4.1-mini-2025-04-14';
     let tokenCap = this.config.maxOutputTokens ?? 1024;
     let temperature = normalizeTemperature(this.config.temperature, model);
@@ -343,15 +379,17 @@ export class LLMClient {
       }
     }
 
+    const attemptModes: Array<'default' | 'json_only' | 'minimal'> = ['default', 'json_only', 'minimal'];
+    const maxAttempts = Math.max(this.config.maxRetries ?? 3, attemptModes.length);
     let lastError: unknown = null;
-    for (let attempt = 1; attempt <= this.config.maxRetries!; attempt++) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
+        const mode = attemptModes[Math.min(attempt - 1, attemptModes.length - 1)];
+        const userPrompt = buildUserPrompt(set, vehicle, featureDescriptions, persona, mode);
         const requestPayload: Record<string, unknown> = {
           model,
           instructions: systemPrompt,
           input: userPrompt,
-          tools: [RANK_VALUE_TOOL],
-          tool_choice: { type: 'function', name: 'rank_value' },
           max_output_tokens: tokenCap,
           ...(serviceTier ? { service_tier: serviceTier } : {}),
           ...(temperature != null ? { temperature } : {}),
@@ -371,22 +409,32 @@ export class LLMClient {
         }
 
         const data = await response.json();
-        const args = extractToolArgumentsFromResponse(data);
-        if (!args || Object.keys(args).length === 0) {
+        const payload = extractStructuredPayloadFromResponse(data);
+        if (!payload || Object.keys(payload).length === 0) {
           const reason = (data.incomplete_details as { reason?: string } | undefined)?.reason;
           if (reason === 'max_output_tokens') {
             throw new Error('max_output_tokens exhausted');
           }
-          throw new Error('empty response from model');
+          throw new Error('empty JSON payload from model');
         }
 
-        const parsed = parseRankValuePayload(args);
+        const parsed = parseBestWorstPayload(payload);
+        if (!set.options.some((option) => option.id === parsed.best)) {
+          throw new Error(`Invalid "best" id "${parsed.best}" for set ${set.id}`);
+        }
+        if (!set.options.some((option) => option.id === parsed.worst)) {
+          throw new Error(`Invalid "worst" id "${parsed.worst}" for set ${set.id}`);
+        }
+        if (parsed.best === parsed.worst) {
+          throw new Error(`best and worst cannot be the same: ${parsed.best}`);
+        }
+
         return {
           setId: set.id,
           personaId: persona.id,
-          mostValued: parsed.mostValued,
-          leastValued: parsed.leastValued,
-          ranking: parsed.ranking || [],
+          mostValued: parsed.best,
+          leastValued: parsed.worst,
+          ranking: [parsed.best, parsed.worst],
           debugTrace: {
             request: requestPayload,
             response: data as Record<string, unknown>,
@@ -410,7 +458,7 @@ export class LLMClient {
           tokenCap = Math.min(4096, Math.max(tokenCap * 2, tokenCap + 320));
         }
         
-        if (attempt === this.config.maxRetries) break;
+        if (attempt === maxAttempts) break;
         
         // Linear backoff
         await new Promise(resolve => setTimeout(resolve, attempt * 1000));
@@ -418,6 +466,92 @@ export class LLMClient {
     }
 
     const reason = lastError instanceof Error ? lastError.message : String(lastError ?? 'Unknown error');
-    throw new Error(`Failed to rank options after ${this.config.maxRetries} attempts: ${reason}`);
+    throw new Error(`Failed to rank options after ${maxAttempts} attempts: ${reason}`);
+  }
+
+  async chooseFeatureVsCash(
+    persona: PersonaProfile,
+    vehicle: { brand: string; name: string; description?: string },
+    input: {
+      featureId: string;
+      featureName: string;
+      featureDescription?: string;
+      amount: number;
+    }
+  ): Promise<{ choice: "A" | "B"; debugTrace?: { request: Record<string, unknown>; response: Record<string, unknown> } }> {
+    const model = this.config.model ?? 'gpt-4.1-mini-2025-04-14';
+    let tokenCap = this.config.maxOutputTokens ?? 600;
+    let temperature = normalizeTemperature(this.config.temperature, model);
+    let serviceTier = mapServiceTier(this.config.serviceTier);
+    const systemPrompt = buildSystemPrompt(persona);
+    const prompt = buildCalibrationPrompt({
+      featureId: input.featureId,
+      featureName: input.featureName,
+      featureDescription: input.featureDescription,
+      amount: input.amount,
+      vehicle,
+      persona,
+    });
+
+    let lastError: unknown = null;
+    for (let attempt = 1; attempt <= Math.max(2, this.config.maxRetries ?? 3); attempt++) {
+      try {
+        const requestPayload: Record<string, unknown> = {
+          model,
+          instructions: systemPrompt,
+          input: prompt,
+          max_output_tokens: tokenCap,
+          ...(serviceTier ? { service_tier: serviceTier } : {}),
+          ...(temperature != null ? { temperature } : {}),
+        };
+        const response = await fetch(`${apiBaseUrl}/llm/rank-options`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestPayload),
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`OpenAI API error: ${response.status} ${response.statusText} ${errText}`);
+        }
+
+        const data = await response.json();
+        const payload = extractStructuredPayloadFromResponse(data);
+        if (!payload || Object.keys(payload).length === 0) {
+          throw new Error('empty JSON payload from model');
+        }
+        const parsed = parseFeatureCashPayload(payload);
+        return {
+          choice: parsed.choice,
+          debugTrace: {
+            request: requestPayload,
+            response: data as Record<string, unknown>,
+          },
+        };
+      } catch (error) {
+        lastError = error;
+        const message = String(error).toLowerCase();
+        if (message.includes('temperature') && message.includes('unsupported')) {
+          temperature = undefined;
+        }
+        if (serviceTier && message.includes('service_tier') && message.includes('invalid')) {
+          serviceTier = undefined;
+        }
+        if (serviceTier === 'flex' && message.includes('flex') && message.includes('unavailable')) {
+          serviceTier = 'default';
+        }
+        if ((message.includes('truncated') || message.includes('max_output_tokens')) && tokenCap < 4096) {
+          tokenCap = Math.min(4096, Math.max(tokenCap * 2, tokenCap + 320));
+        }
+
+        if (attempt === Math.max(2, this.config.maxRetries ?? 3)) break;
+        await new Promise(resolve => setTimeout(resolve, attempt * 500));
+      }
+    }
+
+    const reason = lastError instanceof Error ? lastError.message : String(lastError ?? 'Unknown error');
+    throw new Error(`Failed to run feature-vs-cash calibration after retries: ${reason}`);
   }
 }

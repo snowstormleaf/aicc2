@@ -9,7 +9,7 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { PersonaSelector } from "@/components/PersonaSelector";
 import { VehicleSelector } from "@/components/VehicleSelector";
-import { PerceivedValue } from "@/lib/maxdiff-engine";
+import { PerceivedValue, type PersonaAnalysisSummary } from "@/lib/maxdiff-engine";
 import type { MaxDiffCallLog } from "@/types/analysis";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 
@@ -40,6 +40,7 @@ type PersistedWorkflowState = {
   selectedVehicle: string | null;
   features: Feature[];
   analysisResults: Array<[string, PerceivedValue[]]> | null;
+  analysisSummaries: Array<[string, PersonaAnalysisSummary]> | null;
   callLogs: MaxDiffCallLog[];
   workspaceTab: string;
 };
@@ -65,6 +66,7 @@ const readPersistedWorkflowState = (): PersistedWorkflowState | null => {
       selectedVehicle: typeof parsed.selectedVehicle === "string" ? parsed.selectedVehicle : null,
       features: Array.isArray(parsed.features) ? parsed.features : [],
       analysisResults: Array.isArray(parsed.analysisResults) ? parsed.analysisResults : null,
+      analysisSummaries: Array.isArray(parsed.analysisSummaries) ? parsed.analysisSummaries : null,
       callLogs: Array.isArray(parsed.callLogs) ? parsed.callLogs : [],
       workspaceTab,
     };
@@ -83,6 +85,9 @@ const Index = () => {
   const [analysisResults, setAnalysisResults] = useState<Map<string, PerceivedValue[]> | null>(
     persistedState?.analysisResults ? new Map<string, PerceivedValue[]>(persistedState.analysisResults) : null
   );
+  const [analysisSummaries, setAnalysisSummaries] = useState<Map<string, PersonaAnalysisSummary> | null>(
+    persistedState?.analysisSummaries ? new Map<string, PersonaAnalysisSummary>(persistedState.analysisSummaries) : null
+  );
   const [callLogs, setCallLogs] = useState<MaxDiffCallLog[]>(persistedState?.callLogs ?? []);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [workspaceTab, setWorkspaceTab] = useState(persistedState?.workspaceTab ?? "config");
@@ -96,11 +101,12 @@ const Index = () => {
       selectedVehicle,
       features,
       analysisResults: analysisResults ? Array.from(analysisResults.entries()) : null,
+      analysisSummaries: analysisSummaries ? Array.from(analysisSummaries.entries()) : null,
       callLogs,
       workspaceTab,
     };
     sessionStorage.setItem(WORKFLOW_SESSION_STORAGE_KEY, JSON.stringify(serializable));
-  }, [analysisResults, callLogs, currentStep, features, selectedPersonas, selectedVehicle, workspaceTab]);
+  }, [analysisResults, analysisSummaries, callLogs, currentStep, features, selectedPersonas, selectedVehicle, workspaceTab]);
 
   useEffect(() => {
     const serialized = JSON.stringify(appliedBrands);
@@ -117,6 +123,7 @@ const Index = () => {
     setSelectedPersonas([]);
     setSelectedVehicle(null);
     setAnalysisResults(null);
+    setAnalysisSummaries(null);
     setCallLogs([]);
     setCurrentStep("persona");
   }, [appliedBrands]);
@@ -208,6 +215,7 @@ const Index = () => {
               onFeaturesUploaded={(newFeatures) => {
                 setFeatures(newFeatures);
                 setAnalysisResults(null);
+                setAnalysisSummaries(null);
                 setCallLogs([]);
               }}
             />
@@ -220,8 +228,9 @@ const Index = () => {
               features={features}
               selectedPersonas={selectedPersonas}
               selectedVehicle={selectedVehicle!}
-              onAnalysisComplete={(results, logs) => {
+              onAnalysisComplete={(results, logs, summaries) => {
                 setAnalysisResults(results);
+                setAnalysisSummaries(summaries);
                 setCallLogs(logs);
                 setCurrentStep("results");
               }}
@@ -235,7 +244,7 @@ const Index = () => {
       case "results":
         return analysisResults ? (
           <Suspense fallback={lazyFallback}>
-            <ResultsVisualization results={analysisResults} callLogs={callLogs} />
+            <ResultsVisualization results={analysisResults} callLogs={callLogs} summaries={analysisSummaries ?? new Map()} />
           </Suspense>
         ) : null;
       default:
