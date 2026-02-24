@@ -38,11 +38,37 @@ export interface PerceivedValue {
   featureId: string;
   featureName: string;
   materialCost: number;
-  perceivedValue: number; // USD
+  perceivedValue: number; // USD (display value, clamped at zero)
+  rawModelWtpModelUnits: number;
+  rawModelWtpCurrency: number;
+  rawModelWtpCiLowCurrency: number;
+  rawModelWtpCiHighCurrency: number;
+  utility: number;
+  utilityCiLow: number;
+  utilityCiHigh: number;
   netScore: number; // raw score before scaling
 }
 
+export interface MaxDiffMethodSummary {
+  personaId: string;
+  personaName: string;
+  plannedTasks: number;
+  answeredTasks: number;
+  usedInFitTasks: number;
+  stopReason: string;
+  moneyScale: number;
+  voucherLevelCounts: string;
+}
+
+export interface MoneyModelConfig {
+  transform?: 'log1p' | 'linear';
+  moneyScale?: number;
+  clampNegativeDisplay?: boolean;
+}
+
 export class MaxDiffEngine {
+  static readonly DEFAULT_MONEY_SCALE = 100;
+
   /**
    * Voucher policy:
    * - min = 1
@@ -139,45 +165,109 @@ export class MaxDiffEngine {
    * Compute perceived monetary values for features from raw responses.
    * Uses a Borda-style scoring from the provided rankings and scales scores to USD
    */
-  static computePerceivedValues(responses: RawResponse[], features: Feature[], vouchers: Voucher[] = []): PerceivedValue[] {
+  static computePerceivedValues(
+    responses: RawResponse[],
+    features: Feature[],
+    vouchers: Voucher[] = [],
+    config: MoneyModelConfig = {}
+  ): PerceivedValue[] {
+    const transform = config.transform ?? 'log1p';
+    const moneyScale = config.moneyScale ?? this.DEFAULT_MONEY_SCALE;
+    const clampNegativeDisplay = config.clampNegativeDisplay ?? true;
     const scoreMap: Record<string, number> = {};
-    const maxOptions = responses.reduce((m, r) => Math.max(m, r.ranking.length), 0);
+    const bestCounts: Record<string, number> = {};
+    const worstCounts: Record<string, number> = {};
+    const exposureCounts: Record<string, number> = {};
 
     // Initialize scores
-    features.forEach(f => scoreMap[f.id] = 0);
-    vouchers.forEach(v => scoreMap[v.id] = 0);
+    features.forEach(f => {
+      scoreMap[f.id] = 0;
+      bestCounts[f.id] = 0;
+      worstCounts[f.id] = 0;
+      exposureCounts[f.id] = 0;
+    });
+    vouchers.forEach(v => {
+      scoreMap[v.id] = 0;
+      bestCounts[v.id] = 0;
+      worstCounts[v.id] = 0;
+      exposureCounts[v.id] = 0;
+    });
 
     // Borda count: highest rank gets (n-1) points, next (n-2), ...
     for (const resp of responses) {
       const n = resp.ranking.length;
+      if (resp.mostValued) bestCounts[resp.mostValued] = (bestCounts[resp.mostValued] || 0) + 1;
+      if (resp.leastValued) worstCounts[resp.leastValued] = (worstCounts[resp.leastValued] || 0) + 1;
       for (let i = 0; i < resp.ranking.length; i++) {
         const id = resp.ranking[i];
         const points = Math.max(0, n - 1 - i);
         scoreMap[id] = (scoreMap[id] || 0) + points;
+        exposureCounts[id] = (exposureCounts[id] || 0) + 1;
       }
     }
 
-    // Determine scaling: use max voucher amount as monetary scale; fallback to average feature cost
-    const voucherMax = vouchers.length ? Math.max(...vouchers.map(v => v.amount)) : 0;
-    const avgCost = features.length ? features.reduce((s, f) => s + f.materialCost, 0) / features.length : 0;
-    const scale = Math.max(voucherMax, avgCost || 1);
+    const voucherModelValues = vouchers
+      .map((voucher) => {
+        const amountModel = voucher.amount / moneyScale;
+        const transformed = transform === 'log1p' ? Math.log1p(amountModel) : amountModel;
+        return Number.isFinite(transformed) ? transformed : 0;
+      })
+      .filter((value) => Number.isFinite(value));
 
-    // Find the max raw score among features to normalize
-    const featureScores = features.map(f => ({ id: f.id, score: scoreMap[f.id] || 0 }));
-    const maxRawScore = Math.max(1, ...featureScores.map(s => s.score));
+    const betaMoney = voucherModelValues.length > 0
+      ? -1 / Math.max(1e-6, voucherModelValues.reduce((sum, value) => sum + value, 0) / voucherModelValues.length)
+      : -1;
 
-    // Compute perceived values
+    const centeredUtilities = features.map((feature) => {
+      const exposure = Math.max(1, exposureCounts[feature.id] || 0);
+      const bestRate = (bestCounts[feature.id] || 0) / exposure;
+      const worstRate = (worstCounts[feature.id] || 0) / exposure;
+      return {
+        featureId: feature.id,
+        utility: bestRate - worstRate,
+      };
+    });
+    const utilityMean = centeredUtilities.length
+      ? centeredUtilities.reduce((sum, row) => sum + row.utility, 0) / centeredUtilities.length
+      : 0;
+    const centeredMap = new Map(
+      centeredUtilities.map((row) => [row.featureId, row.utility - utilityMean])
+    );
+
     const perceived: PerceivedValue[] = features.map(f => {
       const raw = scoreMap[f.id] || 0;
-      const normalized = raw / maxRawScore; // 0..1
-      // Perceived value = material cost + normalized * scale * adjustment
-      const perceivedValue = f.materialCost + normalized * scale;
+      const exposure = Math.max(1, exposureCounts[f.id] || 0);
+      const utility = centeredMap.get(f.id) ?? 0;
+      const utilitySe = Math.sqrt(Math.max(1e-6, 1 / exposure));
+      const utilityCiLow = utility - 1.96 * utilitySe;
+      const utilityCiHigh = utility + 1.96 * utilitySe;
+
+      const wtpModelUnits = transform === 'log1p'
+        ? Math.expm1(utility / betaMoney)
+        : utility / betaMoney;
+      const wtpCiLowModelUnits = transform === 'log1p'
+        ? Math.expm1(utilityCiLow / betaMoney)
+        : utilityCiLow / betaMoney;
+      const wtpCiHighModelUnits = transform === 'log1p'
+        ? Math.expm1(utilityCiHigh / betaMoney)
+        : utilityCiHigh / betaMoney;
+
+      const rawModelWtpCurrency = moneyScale * wtpModelUnits;
+      const perceivedValue = clampNegativeDisplay ? Math.max(0, rawModelWtpCurrency) : rawModelWtpCurrency;
+
       return {
         featureId: f.id,
         featureName: f.name,
         materialCost: f.materialCost,
         perceivedValue: Number(perceivedValue.toFixed(2)),
-        netScore: raw
+        rawModelWtpModelUnits: Number(wtpModelUnits.toFixed(6)),
+        rawModelWtpCurrency: Number(rawModelWtpCurrency.toFixed(2)),
+        rawModelWtpCiLowCurrency: Number((moneyScale * wtpCiLowModelUnits).toFixed(2)),
+        rawModelWtpCiHighCurrency: Number((moneyScale * wtpCiHighModelUnits).toFixed(2)),
+        utility: Number(utility.toFixed(6)),
+        utilityCiLow: Number(utilityCiLow.toFixed(6)),
+        utilityCiHigh: Number(utilityCiHigh.toFixed(6)),
+        netScore: raw,
       };
     });
 
@@ -185,5 +275,35 @@ export class MaxDiffEngine {
     perceived.sort((a, b) => b.perceivedValue - a.perceivedValue);
 
     return perceived;
+  }
+
+  static buildMethodSummary(
+    personaId: string,
+    personaName: string,
+    plannedTasks: number,
+    responses: RawResponse[],
+    vouchers: Voucher[],
+    moneyScale = this.DEFAULT_MONEY_SCALE,
+    stopReason = 'stabilityPass'
+  ): MaxDiffMethodSummary {
+    const voucherCounts = vouchers
+      .map((voucher) => {
+        const count = responses.reduce((sum, response) => {
+          return sum + (response.ranking.includes(voucher.id) ? 1 : 0);
+        }, 0);
+        return `${voucher.amount}:${count}`;
+      })
+      .join(', ');
+
+    return {
+      personaId,
+      personaName,
+      plannedTasks,
+      answeredTasks: responses.length,
+      usedInFitTasks: responses.length,
+      stopReason: stopReason || 'maxTasksReached',
+      moneyScale,
+      voucherLevelCounts: voucherCounts,
+    };
   }
 }

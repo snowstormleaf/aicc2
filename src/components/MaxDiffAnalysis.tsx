@@ -27,7 +27,7 @@ import { DEFAULT_MODEL, DEFAULT_SERVICE_TIER, formatPrice, getStoredModelConfig,
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { buildAnalysisCacheKey } from "@/lib/analysis-cache";
-import type { MaxDiffCallLog } from "@/types/analysis";
+import type { MaxDiffCallLog, MaxDiffMethodSummary } from "@/types/analysis";
 import {
   ANALYSIS_SETTINGS_UPDATED_EVENT,
   getStoredAnalysisSettings,
@@ -53,7 +53,7 @@ interface MaxDiffAnalysisProps {
   features: Feature[];
   selectedPersonas: string[];
   selectedVehicle: string;
-  onAnalysisComplete: (results: Map<string, PerceivedValue[]>, callLogs: MaxDiffCallLog[]) => void;
+  onAnalysisComplete: (results: Map<string, PerceivedValue[]>, callLogs: MaxDiffCallLog[], methodSummaries: MaxDiffMethodSummary[]) => void;
   onEditAnalysisParameters?: () => void;
 }
 
@@ -413,7 +413,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
           throw new Error(`Cached results not found for: ${missingPersonas.join(', ')}`);
         }
 
-        onAnalysisComplete(cachedResults, []);
+        onAnalysisComplete(cachedResults, [], []);
         setAnalysisStatus('Loaded cached results.');
         setProgress(100);
         return;
@@ -421,6 +421,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
 
       const callLogs: MaxDiffCallLog[] = [];
       const results = new Map<string, PerceivedValue[]>();
+      const methodSummaries: MaxDiffMethodSummary[] = [];
 
       const upsertCallLog = (entry: MaxDiffCallLog, addToLiveWindow = false) => {
         const existingIndex = callLogs.findIndex((item) => item.id === entry.id);
@@ -585,8 +586,19 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         const perceivedValues = MaxDiffEngine.computePerceivedValues(
           responses,
           engineFeatures,
-          analysisPlan.vouchers
+          analysisPlan.vouchers,
+          { transform: "log1p", moneyScale: MaxDiffEngine.DEFAULT_MONEY_SCALE, clampNegativeDisplay: true }
         );
+
+        methodSummaries.push(MaxDiffEngine.buildMethodSummary(
+          personaId,
+          personaName,
+          analysisPlan.maxDiffSets.length,
+          responses,
+          analysisPlan.vouchers,
+          MaxDiffEngine.DEFAULT_MONEY_SCALE,
+          "stabilityPass"
+        ));
 
         const resultKey = results.has(personaName) ? `${personaName} (${personaId})` : personaName;
         results.set(resultKey, perceivedValues);
@@ -598,7 +610,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
       }
 
       const summarizedCallLogs = callLogs.map(({ request, response, ...log }) => log);
-      onAnalysisComplete(results, summarizedCallLogs);
+      onAnalysisComplete(results, summarizedCallLogs, methodSummaries);
       setAnalysisStatus('Analysis complete!');
       setProgress(100);
     } catch (error) {

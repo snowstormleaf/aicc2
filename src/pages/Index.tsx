@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { PersonaSelector } from "@/components/PersonaSelector";
 import { VehicleSelector } from "@/components/VehicleSelector";
 import { PerceivedValue } from "@/lib/maxdiff-engine";
-import type { MaxDiffCallLog } from "@/types/analysis";
+import type { MaxDiffCallLog, MaxDiffMethodSummary } from "@/types/analysis";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 
 const FeatureUpload = lazy(() =>
@@ -41,6 +41,7 @@ type PersistedWorkflowState = {
   features: Feature[];
   analysisResults: Array<[string, PerceivedValue[]]> | null;
   callLogs: MaxDiffCallLog[];
+  methodSummaries: MaxDiffMethodSummary[];
   workspaceTab: string;
 };
 
@@ -66,6 +67,7 @@ const readPersistedWorkflowState = (): PersistedWorkflowState | null => {
       features: Array.isArray(parsed.features) ? parsed.features : [],
       analysisResults: Array.isArray(parsed.analysisResults) ? parsed.analysisResults : null,
       callLogs: Array.isArray(parsed.callLogs) ? parsed.callLogs : [],
+      methodSummaries: Array.isArray(parsed.methodSummaries) ? parsed.methodSummaries : [],
       workspaceTab,
     };
   } catch {
@@ -84,6 +86,7 @@ const Index = () => {
     persistedState?.analysisResults ? new Map<string, PerceivedValue[]>(persistedState.analysisResults) : null
   );
   const [callLogs, setCallLogs] = useState<MaxDiffCallLog[]>(persistedState?.callLogs ?? []);
+  const [methodSummaries, setMethodSummaries] = useState<MaxDiffMethodSummary[]>(persistedState?.methodSummaries ?? []);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [workspaceTab, setWorkspaceTab] = useState(persistedState?.workspaceTab ?? "config");
   const appliedBrands = useWorkspaceStore((state) => state.appliedBrands);
@@ -97,10 +100,11 @@ const Index = () => {
       features,
       analysisResults: analysisResults ? Array.from(analysisResults.entries()) : null,
       callLogs,
+      methodSummaries,
       workspaceTab,
     };
     sessionStorage.setItem(WORKFLOW_SESSION_STORAGE_KEY, JSON.stringify(serializable));
-  }, [analysisResults, callLogs, currentStep, features, selectedPersonas, selectedVehicle, workspaceTab]);
+  }, [analysisResults, callLogs, currentStep, features, methodSummaries, selectedPersonas, selectedVehicle, workspaceTab]);
 
   useEffect(() => {
     const serialized = JSON.stringify(appliedBrands);
@@ -119,6 +123,7 @@ const Index = () => {
     setAnalysisResults(null);
     setCallLogs([]);
     setCurrentStep("persona");
+    setMethodSummaries([]);
   }, [appliedBrands]);
 
   const steps = useMemo(
@@ -209,6 +214,7 @@ const Index = () => {
                 setFeatures(newFeatures);
                 setAnalysisResults(null);
                 setCallLogs([]);
+                setMethodSummaries([]);
               }}
             />
           </Suspense>
@@ -220,9 +226,10 @@ const Index = () => {
               features={features}
               selectedPersonas={selectedPersonas}
               selectedVehicle={selectedVehicle!}
-              onAnalysisComplete={(results, logs) => {
+              onAnalysisComplete={(results, logs, summaries) => {
                 setAnalysisResults(results);
                 setCallLogs(logs);
+                setMethodSummaries(summaries);
                 setCurrentStep("results");
               }}
               onEditAnalysisParameters={() => {
@@ -235,7 +242,7 @@ const Index = () => {
       case "results":
         return analysisResults ? (
           <Suspense fallback={lazyFallback}>
-            <ResultsVisualization results={analysisResults} callLogs={callLogs} />
+            <ResultsVisualization results={analysisResults} callLogs={callLogs} methodSummaries={methodSummaries} />
           </Suspense>
         ) : null;
       default:

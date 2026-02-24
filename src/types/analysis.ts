@@ -12,3 +12,14 @@ export interface MaxDiffCallLog {
   response?: string;
   error?: string;
 }
+
+export interface MaxDiffMethodSummary {
+  personaId: string;
+  personaName: string;
+  plannedTasks: number;
+  answeredTasks: number;
+  usedInFitTasks: number;
+  stopReason: string;
+  moneyScale: number;
+  voucherLevelCounts: string;
+}

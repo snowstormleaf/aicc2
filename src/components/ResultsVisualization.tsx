@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -22,7 +22,7 @@ import type { TooltipProps } from "recharts";
 import { TrendingUp, Download, FileSpreadsheet, ChevronDown, ChevronUp } from "lucide-react";
 
 import { PerceivedValue } from "@/lib/maxdiff-engine";
-import type { MaxDiffCallLog } from "@/types/analysis";
+import type { MaxDiffCallLog, MaxDiffMethodSummary } from "@/types/analysis";
 import { createXlsxBlob } from "@/lib/xlsx-utils";
 import { classifyValueRatio, formatRatio, getValueRatio } from "@/lib/value-metrics";
 import { buildAxisLayout, buildBarLayout, buildDifferenceData } from "@/lib/results-chart";
@@ -34,6 +34,7 @@ import {
 interface ResultsVisualizationProps {
   results: Map<string, PerceivedValue[]>;
   callLogs: MaxDiffCallLog[];
+  methodSummaries: MaxDiffMethodSummary[];
 }
 
 type ScatterPoint = {
@@ -72,12 +73,15 @@ const getNiceAxisMax = (value: number) => {
   return step * magnitude;
 };
 
-export const ResultsVisualization = ({ results, callLogs }: ResultsVisualizationProps) => {
+export const ResultsVisualization = ({ results, callLogs, methodSummaries }: ResultsVisualizationProps) => {
   const [showDetails, setShowDetails] = useState(false);
   const [hideMaterialCost, setHideMaterialCost] = useState(() => getStoredAnalysisSettings().hideMaterialCost);
   const [parityPercent, setParityPercent] = useState<number[]>([100]);
 
   const personas = useMemo(() => Array.from(results.keys()), [results]);
+  const moneyScale = methodSummaries[0]?.moneyScale ?? 100;
+
+  const getDisplayedValue = useCallback((row: PerceivedValue) => row.rawModelWtpCurrency, []);
   const valueOnlySeries = useMemo(
     () => personas.map((persona, index) => ({ persona, key: `value_${index}` })),
     [personas]
@@ -130,14 +134,14 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
           featureId: result.featureId,
           featureName: result.featureName,
           materialCost: result.materialCost,
-          perceivedValue: result.perceivedValue,
+          perceivedValue: getDisplayedValue(result),
           netScore: result.netScore,
           persona,
         });
       }
     }
     return points;
-  }, [results]);
+  }, [getDisplayedValue, results]);
 
   const byPersona = useMemo(() => {
     const map = new Map<string, ScatterPoint[]>();
@@ -157,7 +161,7 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
       for (const value of perceivedValues) {
         const existing = featureMap.get(value.featureId);
         if (existing) {
-          existing[seriesKey] = value.perceivedValue;
+          existing[seriesKey] = getDisplayedValue(value);
           existing.averageValue =
             valueOnlySeries.reduce((sum, series) => sum + Number(existing[series.key] ?? 0), 0) / valueOnlySeries.length;
         } else {
@@ -169,8 +173,8 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
           valueOnlySeries.forEach((series) => {
             row[series.key] = 0;
           });
-          row[seriesKey] = value.perceivedValue;
-          row.averageValue = value.perceivedValue;
+          row[seriesKey] = getDisplayedValue(value);
+          row.averageValue = getDisplayedValue(value);
           featureMap.set(value.featureId, row);
         }
       }
@@ -184,7 +188,7 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
           Math.max(1, valueOnlySeries.length),
       }))
       .sort((a, b) => Number(b.averageValue) - Number(a.averageValue));
-  }, [results, valueOnlySeries]);
+  }, [getDisplayedValue, results, valueOnlySeries]);
 
   const maxMaterialCost = allData.length ? Math.max(...allData.map((d) => d.materialCost)) : 1;
   const maxPerceivedValue = allData.length ? Math.max(...allData.map((d) => d.perceivedValue)) : 1;
@@ -248,18 +252,16 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
   }, [differenceChartRows]);
 
   const downloadResults = () => {
-    let csvContent = "Persona,Feature Name,Description,Material Cost (USD),Perceived Value (USD),Value Ratio,Category\n";
+    let csvContent = "Persona,Feature Name,Description,Material Cost (USD),Raw model WTP (model units),Raw model WTP (currency),Perceived value (currency, clamped),Value Ratio,Category\n";
 
     for (const [persona, perceivedValues] of results.entries()) {
       csvContent +=
         perceivedValues
           .map((r) => {
-            const ratio = getValueRatio(r.perceivedValue, r.materialCost);
+            const ratio = getValueRatio(getDisplayedValue(r), r.materialCost);
             const category = classifyValueRatio(ratio);
             const ratioLabel = ratio == null ? "N/A" : ratio.toFixed(2);
-            return `"${persona}","${r.featureName}","Feature ${r.featureId}",${r.materialCost},${r.perceivedValue.toFixed(
-              2
-            )},${ratioLabel},${category}`;
+            return `"${persona}","${r.featureName}","Feature ${r.featureId}",${r.materialCost},${r.rawModelWtpModelUnits.toFixed(6)},${r.rawModelWtpCurrency.toFixed(2)},${r.perceivedValue.toFixed(2)},${ratioLabel},${category}`;
           })
           .join("\n") + "\n";
     }
@@ -274,16 +276,38 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
   };
 
   const downloadExcel = () => {
-    const resultsRows: (string | number)[][] = [["Feature", "Material cost", "Value", "Persona"]];
+    const resultsRows: (string | number)[][] = [["Feature", "Material cost", "Raw model WTP (model units)", "Raw model WTP (currency)", "Raw model WTP CI low (currency)", "Raw model WTP CI high (currency)", "Perceived value (currency, clamped)", "Persona"]];
 
     personas.forEach((persona) => {
       const personaResults = results.get(persona) ?? [];
-      const sortedResults = [...personaResults].sort((a, b) => b.perceivedValue - a.perceivedValue);
+      const sortedResults = [...personaResults].sort((a, b) => getDisplayedValue(b) - getDisplayedValue(a));
       sortedResults.forEach((result) => {
-        resultsRows.push([result.featureName, result.materialCost, result.perceivedValue, persona]);
+        resultsRows.push([result.featureName, result.materialCost, result.rawModelWtpModelUnits, result.rawModelWtpCurrency, result.rawModelWtpCiLowCurrency, result.rawModelWtpCiHighCurrency, result.perceivedValue, persona]);
       });
     });
 
+
+    const methodRows: (string | number)[][] = [[
+      "Persona",
+      "Planned tasks",
+      "Answered tasks",
+      "Used-in-fit tasks",
+      "Stop reason",
+      "Money scale",
+      "Voucher level counts",
+    ]];
+
+    methodSummaries.forEach((summary) => {
+      methodRows.push([
+        summary.personaName,
+        summary.plannedTasks,
+        summary.answeredTasks,
+        summary.usedInFitTasks,
+        summary.stopReason,
+        summary.moneyScale,
+        summary.voucherLevelCounts,
+      ]);
+    });
     const callsRows: (string | number)[][] = [
       [
         "Timestamp (UTC)",
@@ -318,6 +342,7 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
 
     const blob = createXlsxBlob([
       { name: "Results", rows: resultsRows },
+      { name: "Method summary", rows: methodRows },
       { name: "MaxDiff API Calls", rows: callsRows },
     ]);
     const url = URL.createObjectURL(blob);
@@ -406,9 +431,10 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
                 {hideMaterialCost
                   ? "Perceived value only, sorted high-to-low"
                   : "Scatter plot of perceived customer value (Y-axis) vs feature material cost (X-axis)"}
+                <span className="ml-2 text-xs text-muted-foreground">Money scale: {moneyScale}</span>
               </CardDescription>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button onClick={downloadResults} variant="outline" size="sm">
                 <Download className="mr-2 h-4 w-4" />
                 Export CSV
@@ -663,21 +689,23 @@ export const ResultsVisualization = ({ results, callLogs }: ResultsVisualization
                           <TableHead>Feature</TableHead>
                           <TableHead className="text-right">Material Cost</TableHead>
                           <TableHead className="text-right">Perceived Value</TableHead>
+                          <TableHead className="text-right">Raw WTP</TableHead>
                           <TableHead className="text-right">Net Score</TableHead>
                           <TableHead className="text-right">Value Ratio</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                           {[...personaResults]
-                            .sort((a, b) => b.perceivedValue - a.perceivedValue)
+                            .sort((a, b) => getDisplayedValue(b) - getDisplayedValue(a))
                             .map((result) => (
                               <TableRow key={result.featureId}>
                                 <TableCell>{result.featureName}</TableCell>
                                 <TableCell className="text-right">${result.materialCost.toFixed(2)}</TableCell>
-                                <TableCell className="text-right">${result.perceivedValue.toFixed(2)}</TableCell>
+                                <TableCell className="text-right">${getDisplayedValue(result).toFixed(2)}</TableCell>
+                                <TableCell className="text-right">${result.rawModelWtpCurrency.toFixed(2)}</TableCell>
                                 <TableCell className="text-right">{result.netScore}</TableCell>
                                 <TableCell className="text-right">
-                                  {formatRatio(getValueRatio(result.perceivedValue, result.materialCost))}
+                                  {formatRatio(getValueRatio(getDisplayedValue(result), result.materialCost))}
                                 </TableCell>
                               </TableRow>
                             ))}
