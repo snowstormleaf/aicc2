@@ -11,13 +11,28 @@ Use this to compare sensitivity before/after hardening.
    - `Money transform`: `log1p`
    - `Bootstrap samples`: `200`
    - `Repeat task fraction`: `10%`
+   - `Target feature exposures`: `12`
+   - `Target voucher exposures`: `10`
+   - `Minimum repeat tasks`: `8`
 3. Enable:
    - `Stabilize to target CI width`
    - Target: `±5%`, Top N: `5`, Batch size: `10`, Max tasks: `80`
+4. Keep deterministic response settings:
+   - `Temperature`: `0.0`
 4. Optionally enable calibration:
    - features: `5`
    - steps: `7`
    - strategy: `partial_override`
+
+## Stability gates
+
+`stability pass` is only eligible after all gates are met:
+- `answered tasks >= max(60, ceil(F * targetFeatureExposures / 3), V * targetVoucherExposuresPerLevel)`
+- `feature appearances >= targetFeatureExposures` per feature
+- `voucher appearances >= targetVoucherExposuresPerLevel` per voucher level
+- `repeat pairs >= minRepeatTasks`
+- `repeatability >= 80%` (joint best+worst agreement)
+- `failure rate <= 2%`
 
 ## Experiment A: Voucher-grid sensitivity
 
@@ -41,8 +56,10 @@ Expected after stabilization: top-feature movement tends toward ±5% target.
 
 - Per-persona summary:
   - `failureRate`
-  - `repeatability.jointAgreementRate`
+  - `repeatability.jointAgreementCount` / `repeatability.totalRepeatPairs`
+  - `moneySignal` (`voucherBestRate`, `voucherWorstRate`, `voucherChosenRate`, `voucherLevelCounts`)
   - `designDiagnostics`
+  - `stabilization.gates`
   - `stabilization.checks`
   - `calibration.scaleFactor`
 - Feature-level:
@@ -50,4 +67,3 @@ Expected after stabilization: top-feature movement tends toward ±5% target.
   - `adjustedWtp`
   - `ciLower95`, `ciUpper95`
   - bootstrap stats (`cv`, `relativeCiWidth`)
-

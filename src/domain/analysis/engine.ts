@@ -2,7 +2,9 @@ import {
   addRepeatTasks,
   extendNearBIBDDesign,
   generateNearBIBDDesign,
+  type DesignBlock,
   type MaxDiffDesignDiagnostics,
+  type SummaryStats,
 } from "./design/maxdiffDesign.ts";
 
 export interface Feature {
@@ -53,6 +55,7 @@ export interface PerceivedValue {
   utility?: number;
   rawWtp?: number;
   adjustedWtp?: number;
+  displayWtp?: number;
   ciLower95?: number;
   ciUpper95?: number;
   bootstrapMean?: number;
@@ -72,6 +75,9 @@ export type CalibrationAdjustmentStrategy = "global_scale" | "partial_override";
 
 export interface RepeatabilityMetrics {
   totalRepeatPairs: number;
+  bestAgreementCount: number;
+  worstAgreementCount: number;
+  jointAgreementCount: number;
   bestAgreementRate: number;
   worstAgreementRate: number;
   jointAgreementRate: number;
@@ -103,7 +109,47 @@ export interface StabilityReport {
   tasksUsed: number;
   batchesAdded: number;
   isStable: boolean;
+  statusLabel?: "pending" | "pass" | "not_reached";
+  stopReason?: "maxTasksReached" | "stabilityPass" | "userCancelled";
+  gates?: StabilityGateStatus;
   checks: StabilityFeatureCheck[];
+}
+
+export interface StabilityGateThresholds {
+  minTasksBeforeStability: number;
+  minFeatureAppearances: number;
+  minVoucherAppearances: number;
+  minRepeatTasks: number;
+  minRepeatability: number;
+  maxFailureRate: number;
+}
+
+export interface StabilityGateStatus {
+  thresholds: StabilityGateThresholds;
+  answeredTasks: number;
+  repeatTasksAnswered: number;
+  failureRate: number;
+  minFeatureExposureAchieved: number;
+  minVoucherExposureAchieved: number;
+  minTasksMet: boolean;
+  minFeatureExposureMet: boolean;
+  minVoucherExposureMet: boolean;
+  minRepeatsMet: boolean;
+  repeatabilityMet: boolean;
+  failureRateMet: boolean;
+  gatesMet: boolean;
+  reasons: string[];
+  canEvaluateStability: boolean;
+}
+
+export interface MoneySignalDiagnostics {
+  voucherBestCount: number;
+  voucherWorstCount: number;
+  voucherChosenCount: number;
+  voucherBestRate: number;
+  voucherWorstRate: number;
+  voucherChosenRate: number;
+  voucherLevelCounts: Record<string, number>;
 }
 
 export interface CalibrationTraceStep {
@@ -141,10 +187,13 @@ export interface PersonaAnalysisSummary {
   beta: number | null;
   designDiagnostics: MaxDiffDesignDiagnostics | null;
   repeatability: RepeatabilityMetrics;
+  answeredTaskCount?: number;
   failedTaskCount: number;
   totalTaskCount: number;
   failureRate: number;
   bootstrapSamples: number;
+  stopReason?: "maxTasksReached" | "stabilityPass" | "userCancelled";
+  moneySignal?: MoneySignalDiagnostics;
   stabilization?: StabilityReport;
   calibration?: {
     enabled: boolean;
@@ -172,24 +221,72 @@ export interface GenerateDesignOptions {
   improvementIterations?: number;
 }
 
+export interface ExtendDesignOptions extends GenerateDesignOptions {
+  additionalTasks: number;
+}
+
+export interface VoucherGenerationBounds {
+  min_discount: number;
+  max_discount: number;
+  levels: number;
+  spacing?: "log" | "linear";
+  include_zero?: boolean;
+}
+
 export class MaxDiffEngine {
+  private static createMulberry32(seed: number) {
+    let t = (seed >>> 0) + 0x6d2b79f5;
+    return () => {
+      t += 0x6d2b79f5;
+      let r = Math.imul(t ^ (t >>> 15), t | 1);
+      r ^= r + Math.imul(r ^ (r >>> 7), r | 61);
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  private static shuffleWithRng<T>(items: T[], rng: () => number): T[] {
+    const next = [...items];
+    for (let i = next.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [next[i], next[j]] = [next[j], next[i]];
+    }
+    return next;
+  }
+
+  private static summarize(values: number[]): SummaryStats {
+    if (values.length === 0) {
+      return { min: 0, mean: 0, max: 0, cv: 0 };
+    }
+    const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+    const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length;
+    const std = Math.sqrt(Math.max(0, variance));
+    return {
+      min: Math.min(...values),
+      mean,
+      max: Math.max(...values),
+      cv: mean === 0 ? 0 : std / Math.abs(mean),
+    };
+  }
+
   /**
    * Voucher policy:
-   * - min = 1
+   * - min = 0 (always include $0)
    * - max = 1.2 * max(feature cost)
-   * - levels = floor(feature_count / 3.5), minimum 2
+   * - levels = 7 (default)
    */
-  static deriveVoucherBounds(featureCosts: number[]): { min_discount: number; max_discount: number; levels: number } {
+  static deriveVoucherBounds(featureCosts: number[]): VoucherGenerationBounds {
     const finiteCosts = featureCosts.filter((value) => Number.isFinite(value) && value > 0);
-    const highestCost = finiteCosts.length > 0 ? Math.max(...finiteCosts) : 1;
-    const minDiscount = 1;
-    const maxDiscount = Number(Math.max(minDiscount, highestCost * 1.2).toFixed(2));
-    const levels = Math.max(2, Math.floor(featureCosts.length / 3.5));
+    const highestCost = finiteCosts.length > 0 ? Math.max(...finiteCosts) : 500;
+    const minDiscount = 0;
+    const maxDiscount = Number(Math.max(50, highestCost * 1.2).toFixed(2));
+    const levels = 7;
 
     return {
       min_discount: minDiscount,
       max_discount: maxDiscount,
       levels,
+      spacing: "log",
+      include_zero: true,
     };
   }
 
@@ -198,31 +295,109 @@ export class MaxDiffEngine {
     return amount.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
   }
 
-  /**
-   * Generate vouchers using geometric spacing across policy bounds.
-   */
-  static generateVouchers(featureCosts: number[], _bounds?: { min_discount: number; max_discount: number; levels: number }): Voucher[] {
-    const bounds = this.deriveVoucherBounds(featureCosts);
-    const levels = Math.max(2, bounds.levels);
-    const vouchers: Voucher[] = [];
-    const ratio = Math.pow(bounds.max_discount / bounds.min_discount, 1 / (levels - 1));
-    let previous = 0;
-
-    for (let i = 0; i < levels; i++) {
-      let amount = bounds.min_discount * Math.pow(ratio, i);
-      if (i === 0) amount = bounds.min_discount;
-      if (i === levels - 1) amount = bounds.max_discount;
-      amount = Number(amount.toFixed(2));
-      amount = Math.max(previous, amount);
-      previous = amount;
-      const formatted = this.formatVoucherAmount(amount);
-      vouchers.push({
-        id: `voucher-${i + 1}`,
-        amount,
-        description: `Voucher: $${formatted} off (level ${i + 1})`
-      });
+  private static linspace(start: number, end: number, points: number) {
+    if (points <= 1) return [start];
+    const step = (end - start) / (points - 1);
+    const values: number[] = [];
+    for (let i = 0; i < points; i++) {
+      values.push(start + step * i);
     }
-    return vouchers;
+    return values;
+  }
+
+  static buildVoucherGrid(
+    bounds: VoucherGenerationBounds,
+    options?: { spacing?: "log" | "linear"; includeZero?: boolean }
+  ): number[] {
+    const includeZero = options?.includeZero ?? bounds.include_zero ?? true;
+    const spacing = options?.spacing ?? bounds.spacing ?? "log";
+    const requestedLevels = Math.max(2, Math.round(bounds.levels));
+    const safeMax = Math.max(1, Number(bounds.max_discount) || 1);
+    const safeMin = Math.max(0, Number(bounds.min_discount) || 0);
+
+    const zeroOffset = includeZero ? 1 : 0;
+    const nonZeroLevels = Math.max(1, requestedLevels - zeroOffset);
+    const minPositiveBase = safeMin > 0 ? safeMin : Math.min(50, Math.max(1, safeMax / 20));
+    const minPositive = Math.min(minPositiveBase, safeMax);
+    const maxRounded = Math.max(1, Math.round(safeMax));
+
+    const dedupeAndSort = (raw: number[]) => {
+      const sorted = [...raw].sort((a, b) => a - b);
+      const out: number[] = [];
+      for (const value of sorted) {
+        let next = Math.round(value);
+        if (!Number.isFinite(next)) continue;
+        if (next < 0) next = 0;
+        if (next > maxRounded) next = maxRounded;
+        if (out.length > 0 && next <= out[out.length - 1]) {
+          next = Math.min(maxRounded, out[out.length - 1] + 1);
+        }
+        if (next === 0 && !includeZero) next = 1;
+        if (out.includes(next)) continue;
+        out.push(next);
+      }
+      return out;
+    };
+
+    const buildLinear = () => {
+      const start = includeZero ? minPositive : Math.max(minPositive, 1);
+      const source = this.linspace(start, safeMax, nonZeroLevels);
+      return dedupeAndSort(source);
+    };
+
+    let nonZeroValues: number[] = [];
+    if (spacing === "log") {
+      const source = this.linspace(Math.log1p(minPositive), Math.log1p(safeMax), nonZeroLevels).map((value) => Math.expm1(value));
+      nonZeroValues = dedupeAndSort(source);
+      if (nonZeroValues.length < nonZeroLevels) {
+        nonZeroValues = buildLinear();
+      }
+    } else {
+      nonZeroValues = buildLinear();
+    }
+
+    if (nonZeroValues.length === 0) {
+      nonZeroValues = [maxRounded];
+    }
+
+    while (nonZeroValues.length < nonZeroLevels && nonZeroValues[nonZeroValues.length - 1] < maxRounded) {
+      nonZeroValues.push(Math.min(maxRounded, nonZeroValues[nonZeroValues.length - 1] + 1));
+    }
+
+    while (nonZeroValues.length > nonZeroLevels) {
+      nonZeroValues.splice(nonZeroValues.length - 2, 1);
+    }
+
+    const levels = includeZero ? [0, ...nonZeroValues] : [...nonZeroValues];
+    return Array.from(new Set(levels)).sort((a, b) => a - b);
+  }
+
+  private static voucherOptionName(amount: number) {
+    return amount <= 0 ? "No price reduction ($0)" : `Price reduction ($${this.formatVoucherAmount(amount)})`;
+  }
+
+  /**
+   * Generate voucher levels with optional log/linear spacing.
+   */
+  static generateVouchers(featureCosts: number[], bounds?: VoucherGenerationBounds): Voucher[] {
+    const derived = this.deriveVoucherBounds(featureCosts);
+    const merged: VoucherGenerationBounds = {
+      ...derived,
+      ...(bounds ?? {}),
+    };
+    const levels = this.buildVoucherGrid(merged, {
+      spacing: merged.spacing,
+      includeZero: merged.include_zero ?? true,
+    });
+
+    return levels.map((amount, index) => ({
+      id: `voucher-${index + 1}`,
+      amount,
+      description:
+        amount <= 0
+          ? `No price reduction ($0) (level ${index + 1})`
+          : `Price reduction: $${this.formatVoucherAmount(amount)} off purchase price (level ${index + 1})`,
+    }));
   }
 
   /**
@@ -238,46 +413,234 @@ export class MaxDiffEngine {
   }
 
   private static buildOptionPool(features: Feature[], vouchers: Voucher[]) {
-    const pool = features.map(f => ({ id: f.id, name: f.name, description: f.description }))
-      // Also include voucher placeholders as additional options so LLM can see monetary references
-      .concat(vouchers.map(v => ({ id: v.id, name: `Voucher (${v.amount})`, description: v.description })));
+    const pool = features.map((feature) => ({ id: feature.id, name: feature.name, description: feature.description }))
+      .concat(vouchers.map((voucher) => ({ id: voucher.id, name: this.voucherOptionName(voucher.amount), description: voucher.description })));
     return pool;
   }
 
-  private static generateLegacySets(
-    pool: Array<{ id: string; name: string; description?: string }>,
+  private static generateLegacyBlocks(
+    items: string[],
     r: number,
-    itemsPerSet: number
-  ) {
-    const totalItems = pool.length;
-    const setsCount = Math.ceil((totalItems * r) / itemsPerSet);
+    itemsPerSet: number,
+    seed: number,
+    startIndex: number = 1
+  ): DesignBlock[] {
+    const totalItems = items.length;
+    const setsCount = Math.ceil((totalItems * r) / Math.max(2, itemsPerSet));
+    const rng = this.createMulberry32(seed);
 
-    // Simple round-robin distribution to ensure each item appears ~r times.
     const appearances: Record<string, number> = {};
-    pool.forEach(p => appearances[p.id] = 0);
-
-    const sets: MaxDiffSet[] = [];
+    items.forEach((item) => {
+      appearances[item] = 0;
+    });
+    const sets: DesignBlock[] = [];
 
     for (let s = 0; s < setsCount; s++) {
-      // sort pool by times appeared (ascending) to favor less-seen items
-      const sorted = [...pool].sort((a, b) => appearances[a.id] - appearances[b.id]);
+      const sorted = [...items].sort((left, right) => {
+        const delta = appearances[left] - appearances[right];
+        if (delta !== 0) return delta;
+        return rng() < 0.5 ? -1 : 1;
+      });
       const selected = sorted.slice(0, itemsPerSet);
-
-      // If not enough unique items, fill with shuffled items
       if (selected.length < itemsPerSet) {
-        const fill = [...pool].sort(() => Math.random() - 0.5).slice(0, itemsPerSet - selected.length);
-        selected.push(...fill);
+        const fill = this.shuffleWithRng(items, rng).slice(0, itemsPerSet - selected.length);
+        selected.push(...fill.filter((item) => !selected.includes(item)));
       }
-
-      selected.forEach(item => appearances[item.id] = (appearances[item.id] || 0) + 1);
-
+      selected.forEach((item) => {
+        appearances[item] = (appearances[item] || 0) + 1;
+      });
       sets.push({
-        id: `set-${s + 1}`,
-        options: selected.map(o => ({ id: o.id, name: o.name, description: o.description }))
+        id: `set-${startIndex + s}`,
+        itemIds: selected,
       });
     }
 
     return sets;
+  }
+
+  private static buildFeatureBlocks(
+    featureIds: string[],
+    r: number,
+    blockSize: number,
+    designMode: DesignMode,
+    seed: number,
+    repeatFraction: number,
+    improvementIterations?: number
+  ) {
+    const safeFeatureIds = [...new Set(featureIds)];
+    if (safeFeatureIds.length === 0) return [] as DesignBlock[];
+    const safeBlockSize = Math.max(2, Math.min(blockSize, safeFeatureIds.length));
+
+    const base =
+      designMode === "legacy"
+        ? this.generateLegacyBlocks(safeFeatureIds, r, safeBlockSize, seed, 1)
+        : generateNearBIBDDesign(safeFeatureIds, safeBlockSize, r, seed, {
+            improvementIterations,
+          }).blocks;
+
+    return addRepeatTasks(base, Math.max(0, repeatFraction), seed + 17_129);
+  }
+
+  private static chooseBalancedVoucherIds(
+    vouchers: Voucher[],
+    targetCount: number,
+    seed: number,
+    existingCounts?: Map<string, number>
+  ) {
+    if (vouchers.length === 0 || targetCount <= 0) return [] as string[];
+    const rng = this.createMulberry32(seed);
+    const counts = new Map<string, number>();
+    vouchers.forEach((voucher) => {
+      counts.set(voucher.id, existingCounts?.get(voucher.id) ?? 0);
+    });
+    const picks: string[] = [];
+
+    for (let i = 0; i < targetCount; i++) {
+      let minCount = Number.POSITIVE_INFINITY;
+      const candidates: string[] = [];
+      for (const voucher of vouchers) {
+        const count = counts.get(voucher.id) ?? 0;
+        if (count < minCount) {
+          minCount = count;
+          candidates.length = 0;
+          candidates.push(voucher.id);
+        } else if (count === minCount) {
+          candidates.push(voucher.id);
+        }
+      }
+      const selected = candidates[Math.floor(rng() * candidates.length)];
+      picks.push(selected);
+      counts.set(selected, (counts.get(selected) ?? 0) + 1);
+    }
+
+    return picks;
+  }
+
+  private static shuffleSetItems(itemIds: string[], seed: number) {
+    const rng = this.createMulberry32(seed);
+    return this.shuffleWithRng(itemIds, rng);
+  }
+
+  private static extractFeatureBlocksFromSets(sets: MaxDiffSet[], voucherIds: Set<string>) {
+    return sets.map((set) => ({
+      id: set.id,
+      repeatOfSetId: set.repeatOfSetId,
+      itemIds: set.options.map((option) => option.id).filter((id) => !voucherIds.has(id)),
+    }));
+  }
+
+  private static countVoucherExposures(sets: MaxDiffSet[], vouchers: Voucher[]) {
+    const counts = new Map(vouchers.map((voucher) => [voucher.id, 0]));
+    const voucherIds = new Set(vouchers.map((voucher) => voucher.id));
+
+    sets.forEach((set) => {
+      const voucherId = set.options.map((option) => option.id).find((id) => voucherIds.has(id));
+      if (!voucherId) return;
+      counts.set(voucherId, (counts.get(voucherId) ?? 0) + 1);
+    });
+    return counts;
+  }
+
+  private static mergeStructuredDiagnostics(
+    featureIds: string[],
+    featureBlockSize: number,
+    featureBlocks: DesignBlock[],
+    vouchers: Voucher[],
+    fullSets: MaxDiffSet[],
+    seed: number
+  ): MaxDiffDesignDiagnostics | null {
+    if (featureIds.length === 0) return null;
+    const featureDiagnostics = extendNearBIBDDesign(featureIds, featureBlockSize, featureBlocks, 0, seed).diagnostics;
+    if (vouchers.length === 0) return featureDiagnostics;
+
+    const voucherCountsMap = this.countVoucherExposures(fullSets, vouchers);
+    const voucherCounts: Record<string, number> = {};
+    vouchers.forEach((voucher) => {
+      voucherCounts[voucher.id] = voucherCountsMap.get(voucher.id) ?? 0;
+    });
+    const voucherValues = vouchers.map((voucher) => voucherCounts[voucher.id]);
+    const seenVoucherLevels = voucherValues.filter((value) => value > 0).length;
+    const voucherCoverage = vouchers.length > 0 ? seenVoucherLevels / vouchers.length : 0;
+    const voucherSummary = this.summarize(voucherValues);
+
+    return {
+      ...featureDiagnostics,
+      voucherCounts,
+      voucherSummary,
+      voucherCoverage,
+      voucherCountImbalance: voucherSummary.max - voucherSummary.min,
+    };
+  }
+
+  private static buildSetFromBlock(
+    block: DesignBlock,
+    voucherId: string,
+    optionLookup: Map<string, { id: string; name: string; description?: string }>,
+    seed: number
+  ): MaxDiffSet {
+    const itemIds = this.shuffleSetItems([...block.itemIds, voucherId], seed);
+    return {
+      id: block.id,
+      repeatOfSetId: block.repeatOfSetId,
+      options: itemIds
+        .map((id) => optionLookup.get(id))
+        .filter(Boolean)
+        .map((option) => ({ id: option!.id, name: option!.name, description: option!.description })),
+    };
+  }
+
+  private static buildStructuredPlan(
+    features: Feature[],
+    vouchers: Voucher[],
+    options: GenerateDesignOptions
+  ): GeneratedDesignPlan {
+    const seed = Number.isFinite(options.seed) ? Number(options.seed) : 42;
+    const r = Math.max(1, Math.floor(options.r ?? 3));
+    const repeatFraction = Math.max(0, options.repeatFraction ?? 0);
+    const designMode: DesignMode = options.designMode ?? "near_bibd";
+    const featureIds = features.map((feature) => feature.id);
+    const featureBlockSize = Math.max(2, Math.min(3, featureIds.length));
+    const optionLookup = new Map(this.buildOptionPool(features, vouchers).map((option) => [option.id, option]));
+
+    const featureBlocks = this.buildFeatureBlocks(
+      featureIds,
+      r,
+      featureBlockSize,
+      designMode,
+      seed,
+      repeatFraction,
+      options.improvementIterations
+    );
+    const baseBlocks = featureBlocks.filter((block) => !block.repeatOfSetId);
+    const voucherBySetId = new Map<string, string>();
+    const voucherAssignments = this.chooseBalancedVoucherIds(vouchers, baseBlocks.length, seed + 41);
+    baseBlocks.forEach((block, index) => {
+      voucherBySetId.set(block.id, voucherAssignments[index]);
+    });
+
+    const maxDiffSets = featureBlocks.map((block, index) => {
+      const assignedVoucher =
+        block.repeatOfSetId != null
+          ? voucherBySetId.get(block.repeatOfSetId) ?? voucherAssignments[index % voucherAssignments.length]
+          : voucherBySetId.get(block.id) ?? voucherAssignments[index % voucherAssignments.length];
+      voucherBySetId.set(block.id, assignedVoucher);
+      return this.buildSetFromBlock(block, assignedVoucher, optionLookup, seed + 97 + index);
+    });
+
+    const diagnostics = this.mergeStructuredDiagnostics(
+      featureIds,
+      featureBlockSize,
+      featureBlocks,
+      vouchers,
+      maxDiffSets,
+      seed
+    );
+
+    return {
+      designMode,
+      maxDiffSets,
+      diagnostics,
+    };
   }
 
   static generateMaxDiffPlan(
@@ -285,17 +648,27 @@ export class MaxDiffEngine {
     vouchers: Voucher[] = [],
     options: GenerateDesignOptions = {}
   ): GeneratedDesignPlan {
+    const designMode: DesignMode = options.designMode ?? "near_bibd";
+    const seed = Number.isFinite(options.seed) ? Number(options.seed) : 42;
     const pool = this.buildOptionPool(features, vouchers);
     const items = pool.map((option) => option.id);
     const lookup = new Map(pool.map((option) => [option.id, option]));
     const r = Math.max(1, Math.floor(options.r ?? 3));
     const itemsPerSet = Math.max(2, Math.min(Math.floor(options.itemsPerSet ?? 4), Math.max(2, items.length)));
-    const designMode: DesignMode = options.designMode ?? "near_bibd";
-    const seed = Number.isFinite(options.seed) ? Number(options.seed) : 42;
+
+    if (vouchers.length > 0 && itemsPerSet >= 4) {
+      return this.buildStructuredPlan(features, vouchers, options);
+    }
 
     if (designMode === "legacy") {
-      const legacySets = this.generateLegacySets(pool, r, itemsPerSet);
-      const legacyBlocks = legacySets.map((set) => ({ id: set.id, itemIds: set.options.map((option) => option.id) }));
+      const legacyBlocks = this.generateLegacyBlocks(items, r, itemsPerSet, seed, 1);
+      const legacySets = legacyBlocks.map((block) => ({
+        id: block.id,
+        options: block.itemIds
+          .map((id) => lookup.get(id))
+          .filter(Boolean)
+          .map((option) => ({ id: option!.id, name: option!.name, description: option!.description })),
+      }));
       const diagnostics =
         items.length >= 2
           ? extendNearBIBDDesign(items, itemsPerSet, legacyBlocks, 0, seed).diagnostics
@@ -321,6 +694,132 @@ export class MaxDiffEngine {
         .filter(Boolean)
         .map((option) => ({ id: option!.id, name: option!.name, description: option!.description })),
     }));
+
+    return {
+      designMode,
+      maxDiffSets,
+      diagnostics,
+    };
+  }
+
+  static extendMaxDiffPlan(
+    existingSets: MaxDiffSet[],
+    features: Feature[],
+    vouchers: Voucher[] = [],
+    options: ExtendDesignOptions
+  ): GeneratedDesignPlan {
+    const additionalTasks = Math.max(0, Math.floor(options.additionalTasks));
+    if (additionalTasks === 0) {
+      return {
+        designMode: options.designMode ?? "near_bibd",
+        maxDiffSets: [...existingSets],
+        diagnostics: null,
+      };
+    }
+
+    const designMode: DesignMode = options.designMode ?? "near_bibd";
+    const seed = Number.isFinite(options.seed) ? Number(options.seed) : 42;
+    const repeatFraction = Math.max(0, options.repeatFraction ?? 0);
+    const optionLookup = new Map(this.buildOptionPool(features, vouchers).map((option) => [option.id, option]));
+
+    if (vouchers.length === 0) {
+      const items = features.map((feature) => feature.id);
+      const itemsPerSet = Math.max(2, Math.min(Math.floor(options.itemsPerSet ?? 4), Math.max(2, items.length)));
+      const existingBlocks = existingSets.map((set) => ({
+        id: set.id,
+        repeatOfSetId: set.repeatOfSetId,
+        itemIds: set.options.map((option) => option.id),
+      }));
+      const extended = extendNearBIBDDesign(items, itemsPerSet, existingBlocks, additionalTasks, seed, {
+        improvementIterations: options.improvementIterations,
+      });
+      const maxDiffSets = extended.blocks.map((block) => ({
+        id: block.id,
+        repeatOfSetId: block.repeatOfSetId,
+        options: block.itemIds
+          .map((id) => optionLookup.get(id))
+          .filter(Boolean)
+          .map((option) => ({ id: option!.id, name: option!.name, description: option!.description })),
+      }));
+      return {
+        designMode,
+        maxDiffSets,
+        diagnostics: extended.diagnostics,
+      };
+    }
+
+    const voucherIds = new Set(vouchers.map((voucher) => voucher.id));
+    const featureIds = features.map((feature) => feature.id);
+    const featureBlockSize = Math.max(2, Math.min(3, featureIds.length));
+    const existingFeatureBlocks = this.extractFeatureBlocksFromSets(existingSets, voucherIds);
+
+    const repeatCount =
+      repeatFraction > 0 && additionalTasks > 1
+        ? Math.min(additionalTasks - 1, Math.max(1, Math.round(additionalTasks * repeatFraction)))
+        : 0;
+    const coreCount = Math.max(1, additionalTasks - repeatCount);
+
+    const extendedFeatures = extendNearBIBDDesign(featureIds, featureBlockSize, existingFeatureBlocks, coreCount, seed, {
+      improvementIterations: options.improvementIterations,
+    });
+    const newCoreFeatureBlocks = extendedFeatures.blocks.slice(existingFeatureBlocks.length);
+
+    const existingVoucherCounts = this.countVoucherExposures(existingSets, vouchers);
+    const newVoucherAssignments = this.chooseBalancedVoucherIds(
+      vouchers,
+      newCoreFeatureBlocks.length,
+      seed + 311,
+      existingVoucherCounts
+    );
+    const newCoreSets = newCoreFeatureBlocks.map((block, index) => {
+      const voucherId = newVoucherAssignments[index % newVoucherAssignments.length];
+      return this.buildSetFromBlock(block, voucherId, optionLookup, seed + 900 + index);
+    });
+
+    const repeatCandidates = [...existingSets, ...newCoreSets].filter((set) => !set.repeatOfSetId);
+    const repeatRng = this.createMulberry32(seed + 733);
+    const newRepeatSets: MaxDiffSet[] = [];
+    const maxDistinct = Math.min(repeatCandidates.length, repeatCount);
+    const pool = [...repeatCandidates];
+
+    for (let i = 0; i < maxDistinct; i++) {
+      const idx = Math.floor(repeatRng() * pool.length);
+      const selected = pool.splice(idx, 1)[0];
+      newRepeatSets.push({
+        id: `set-repeat-extra-${existingSets.length + i + 1}`,
+        repeatOfSetId: selected.id,
+        options: selected.options.map((option) => ({ ...option })),
+      });
+    }
+
+    while (newRepeatSets.length < repeatCount && repeatCandidates.length > 0) {
+      const selected = repeatCandidates[Math.floor(repeatRng() * repeatCandidates.length)];
+      newRepeatSets.push({
+        id: `set-repeat-extra-${existingSets.length + newRepeatSets.length + 1}`,
+        repeatOfSetId: selected.id,
+        options: selected.options.map((option) => ({ ...option })),
+      });
+    }
+
+    const maxDiffSets = [...existingSets, ...newCoreSets, ...newRepeatSets];
+    const mergedFeatureBlocks = [
+      ...existingFeatureBlocks,
+      ...newCoreFeatureBlocks,
+      ...newRepeatSets.map((set) => ({
+        id: set.id,
+        repeatOfSetId: set.repeatOfSetId,
+        itemIds: set.options.map((option) => option.id).filter((id) => !voucherIds.has(id)),
+      })),
+    ];
+
+    const diagnostics = this.mergeStructuredDiagnostics(
+      featureIds,
+      featureBlockSize,
+      mergedFeatureBlocks,
+      vouchers,
+      maxDiffSets,
+      seed + 1_511
+    );
 
     return {
       designMode,

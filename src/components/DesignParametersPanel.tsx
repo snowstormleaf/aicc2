@@ -31,6 +31,9 @@ export const DesignParametersPanel = ({ featureCount }: DesignParametersPanelPro
   const topNOptions = [3, 5, 8, 10];
   const batchSizeOptions = [5, 10, 15, 20];
   const maxTasksOptions = [40, 60, 80, 120, 160];
+  const featureExposureOptions = [8, 10, 12, 15, 18];
+  const voucherExposureOptions = [6, 8, 10, 12, 15];
+  const minRepeatTaskOptions = [4, 6, 8, 10, 12];
   const calibrationFeatureOptions = [3, 5, 7, 10];
   const calibrationStepOptions = [5, 7, 9, 11];
 
@@ -116,7 +119,7 @@ export const DesignParametersPanel = ({ featureCount }: DesignParametersPanelPro
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                For GPT-5 models, unsupported values are automatically omitted by the client.
+                Set to 0 for deterministic repeatability.
               </p>
             </div>
           </div>
@@ -235,6 +238,66 @@ export const DesignParametersPanel = ({ featureCount }: DesignParametersPanelPro
                 </SelectContent>
               </Select>
             </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="analysis-target-feature-exposures">Target feature exposures</Label>
+              <Select
+                value={String(analysisSettings.targetFeatureExposures)}
+                onValueChange={(value) => updateAnalysisSettings("targetFeatureExposures", Number(value))}
+              >
+                <SelectTrigger id="analysis-target-feature-exposures">
+                  <SelectValue placeholder="Select feature exposures" />
+                </SelectTrigger>
+                <SelectContent>
+                  {featureExposureOptions.map((value) => (
+                    <SelectItem key={value} value={String(value)}>
+                      {value}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Minimum appearances required per feature.</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="analysis-target-voucher-exposures">Target voucher exposures</Label>
+              <Select
+                value={String(analysisSettings.targetVoucherExposuresPerLevel)}
+                onValueChange={(value) => updateAnalysisSettings("targetVoucherExposuresPerLevel", Number(value))}
+              >
+                <SelectTrigger id="analysis-target-voucher-exposures">
+                  <SelectValue placeholder="Select voucher exposures" />
+                </SelectTrigger>
+                <SelectContent>
+                  {voucherExposureOptions.map((value) => (
+                    <SelectItem key={value} value={String(value)}>
+                      {value}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Minimum appearances required for each voucher level.</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="analysis-min-repeat-tasks">Minimum repeat tasks</Label>
+              <Select
+                value={String(analysisSettings.minRepeatTasks)}
+                onValueChange={(value) => updateAnalysisSettings("minRepeatTasks", Number(value))}
+              >
+                <SelectTrigger id="analysis-min-repeat-tasks">
+                  <SelectValue placeholder="Select minimum repeats" />
+                </SelectTrigger>
+                <SelectContent>
+                  {minRepeatTaskOptions.map((value) => (
+                    <SelectItem key={value} value={String(value)}>
+                      {value}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Required answered repeat pairs before stability pass.</p>
+            </div>
           </div>
 
           <div className="space-y-3 rounded-md border border-border-subtle bg-muted/10 p-3">
@@ -242,8 +305,8 @@ export const DesignParametersPanel = ({ featureCount }: DesignParametersPanelPro
               <div>
                 <p className="text-sm font-medium">Voucher spacing policy</p>
                 <p className="text-xs text-muted-foreground">
-                  Vouchers use fixed policy bounds: min $1, max 1.2× highest feature cost, levels floor(features/3.5),
-                  geometric spacing.
+                  Vouchers use fixed policy bounds: min $0, max 1.2× highest feature cost, 7 levels by default, log
+                  spacing in log1p-space, and exactly 1 voucher per task.
                 </p>
               </div>
             </div>

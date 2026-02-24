@@ -16,6 +16,9 @@ export interface AnalysisSettings {
   designSeed: number;
   repeatTaskFraction: number;
   bootstrapSamples: number;
+  targetFeatureExposures: number;
+  targetVoucherExposuresPerLevel: number;
+  minRepeatTasks: number;
   stabilizeToTarget: boolean;
   stabilityTargetPercent: number;
   stabilityTopN: number;
@@ -42,6 +45,9 @@ export const DEFAULT_ANALYSIS_SETTINGS: AnalysisSettings = {
   designSeed: 42,
   repeatTaskFraction: 0.1,
   bootstrapSamples: 200,
+  targetFeatureExposures: 12,
+  targetVoucherExposuresPerLevel: 10,
+  minRepeatTasks: 8,
   stabilizeToTarget: false,
   stabilityTargetPercent: 5,
   stabilityTopN: 5,
@@ -81,6 +87,20 @@ const normalizeSettings = (candidate: Partial<AnalysisSettings>): AnalysisSettin
   designSeed: clamp(Math.round(candidate.designSeed ?? DEFAULT_ANALYSIS_SETTINGS.designSeed), 1, 2_000_000_000),
   repeatTaskFraction: clamp(Number(candidate.repeatTaskFraction ?? DEFAULT_ANALYSIS_SETTINGS.repeatTaskFraction), 0, 0.4),
   bootstrapSamples: clamp(Math.round(candidate.bootstrapSamples ?? DEFAULT_ANALYSIS_SETTINGS.bootstrapSamples), 20, 1000),
+  targetFeatureExposures: clamp(
+    Math.round(candidate.targetFeatureExposures ?? DEFAULT_ANALYSIS_SETTINGS.targetFeatureExposures),
+    4,
+    30
+  ),
+  targetVoucherExposuresPerLevel: clamp(
+    Math.round(
+      candidate.targetVoucherExposuresPerLevel ??
+        DEFAULT_ANALYSIS_SETTINGS.targetVoucherExposuresPerLevel
+    ),
+    4,
+    30
+  ),
+  minRepeatTasks: clamp(Math.round(candidate.minRepeatTasks ?? DEFAULT_ANALYSIS_SETTINGS.minRepeatTasks), 2, 30),
   stabilizeToTarget: candidate.stabilizeToTarget ?? DEFAULT_ANALYSIS_SETTINGS.stabilizeToTarget,
   stabilityTargetPercent: clamp(
     Number(candidate.stabilityTargetPercent ?? DEFAULT_ANALYSIS_SETTINGS.stabilityTargetPercent),

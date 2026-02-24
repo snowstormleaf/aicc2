@@ -82,6 +82,7 @@ export const LlmResponseRequestSchema = z.object({
   max_output_tokens: z.number().int().positive().optional(),
   service_tier: z.string().optional(),
   temperature: z.number().optional(),
+  top_p: z.number().optional(),
   tools: z.array(z.unknown()).optional(),
   tool_choice: z.unknown().optional(),
 });
@@ -92,6 +93,7 @@ export const LlmVoucherBoundsSchema = z.object({
   max_output_tokens: z.number().int().positive().optional(),
   service_tier: z.string().optional(),
   temperature: z.number().optional(),
+  top_p: z.number().optional(),
 });
 
 // ===== VALIDATION UTILITIES =====

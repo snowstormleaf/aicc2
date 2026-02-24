@@ -7,7 +7,8 @@ import type {
   RepeatabilityMetrics,
   StabilityFeatureCheck,
   Voucher,
-} from "../engine.ts";
+} from "@/domain/analysis/engine";
+import { wtpFromUtility } from "../wtp.ts";
 
 type TaskObservation = {
   setId: string;
@@ -110,9 +111,7 @@ const moneyTransform = (amount: number, transform: MoneyTransform) => {
 };
 
 export const invertMoneyUtility = (utility: number, beta: number, transform: MoneyTransform) => {
-  const safeBeta = Math.max(beta, 1e-8);
-  if (transform === "linear") return utility / safeBeta;
-  return Math.exp(utility / safeBeta) - 1;
+  return wtpFromUtility(utility, beta, transform);
 };
 
 const buildTasks = (sets: MaxDiffSet[], responses: RawResponse[]): TaskBuildResult => {
@@ -481,6 +480,9 @@ export const computeRepeatability = (sets: MaxDiffSet[], responses: RawResponse[
 
   return {
     totalRepeatPairs: total,
+    bestAgreementCount: bestMatches,
+    worstAgreementCount: worstMatches,
+    jointAgreementCount: jointMatches,
     bestAgreementRate: total > 0 ? bestMatches / total : 0,
     worstAgreementRate: total > 0 ? worstMatches / total : 0,
     jointAgreementRate: total > 0 ? jointMatches / total : 0,

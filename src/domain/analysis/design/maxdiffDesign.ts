@@ -28,6 +28,10 @@ export interface MaxDiffDesignDiagnostics {
   itemCountImbalance: number;
   pairCountImbalance: number;
   pairSquaredDeviation: number;
+  voucherCounts?: Record<ItemId, number>;
+  voucherSummary?: SummaryStats;
+  voucherCoverage?: number;
+  voucherCountImbalance?: number;
   exactBibd: {
     isExact: boolean;
     params?: {
@@ -501,4 +505,3 @@ export const addRepeatTasks = (
 
   return [...blocks, ...repeated];
 };
-

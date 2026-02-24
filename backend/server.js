@@ -417,7 +417,14 @@ app.post('/api/llm/voucher-bounds', async (req, res) => {
     if (!validation.success) {
       throw new ValidationError(validation.error);
     }
-    const { model = 'o4-mini-2025-04-16', prompt, max_output_tokens = 400, service_tier, temperature } = validation.data;
+    const {
+      model = 'o4-mini-2025-04-16',
+      prompt,
+      max_output_tokens = 400,
+      service_tier,
+      temperature,
+      top_p,
+    } = validation.data;
 
     const data = await callOpenAiResponses({
       model,
@@ -426,6 +433,7 @@ app.post('/api/llm/voucher-bounds', async (req, res) => {
       max_output_tokens,
       ...(service_tier ? { service_tier } : {}),
       ...(temperature != null ? { temperature } : {}),
+      ...(top_p != null ? { top_p } : {}),
     });
     return res.json(data);
   } catch (err) {

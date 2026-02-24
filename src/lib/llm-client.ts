@@ -10,6 +10,41 @@ export interface LLMConfig {
   maxOutputTokens?: number;
 }
 
+const BEST_WORST_TOOL = {
+  type: "function",
+  name: "submit_best_worst",
+  description: "Submit exactly one best option id and one worst option id for the current set.",
+  strict: true,
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      best: { type: "string", description: "Option id selected as BEST." },
+      worst: { type: "string", description: "Option id selected as WORST." },
+    },
+    required: ["best", "worst"],
+  },
+} as const;
+
+const FEATURE_CASH_TOOL = {
+  type: "function",
+  name: "submit_feature_vs_cash_choice",
+  description: "Choose A for feature or B for cash price reduction.",
+  strict: true,
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      choice: {
+        type: "string",
+        enum: ["A", "B"],
+        description: "A means choose feature, B means choose price reduction.",
+      },
+    },
+    required: ["choice"],
+  },
+} as const;
+
 export interface VoucherBounds {
   min_discount: number;
   max_discount: number;
@@ -115,6 +150,7 @@ Evaluate these 4 options:
 ${optionsText}
 
 If an option is monetary, interpret it as a PRICE REDUCTION on purchase price (not a gift card, not free cash).
+Assume any feature can be turned off; if a feature is not valuable, treat it as neutral rather than harmful.
 Choose:
 - "best": the single most valuable option for you.
 - "worst": the single least valuable option for you.
@@ -237,13 +273,12 @@ const extractOutputText = (response: Record<string, unknown>): string => {
   return '';
 };
 
-const normalizeTemperature = (temperature: number | undefined, model: string): number | undefined => {
+const normalizeTemperature = (temperature: number | undefined): number | undefined => {
   if (temperature == null) return undefined;
-  if (model.startsWith('gpt-5') && temperature !== 1 && temperature !== 1.0) {
-    return undefined;
-  }
-  return temperature;
+  return clamp(Number(temperature), 0, 2);
 };
+
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
 const mapServiceTier = (serviceTier?: 'standard' | 'flex'): string | undefined => {
   if (serviceTier === 'flex') return 'flex';
@@ -312,7 +347,8 @@ export class LLMClient {
           prompt,
           max_output_tokens: 400,
           service_tier: mapServiceTier(this.config.serviceTier),
-          temperature: normalizeTemperature(this.config.temperature, this.config.reasoningModel ?? '')
+          temperature: normalizeTemperature(this.config.temperature),
+          top_p: 1,
         }),
       });
 
@@ -366,7 +402,7 @@ export class LLMClient {
     const systemPrompt = buildSystemPrompt(persona);
     const model = this.config.model ?? 'gpt-4.1-mini-2025-04-14';
     let tokenCap = this.config.maxOutputTokens ?? 1024;
-    let temperature = normalizeTemperature(this.config.temperature, model);
+    let temperature = normalizeTemperature(this.config.temperature);
     let serviceTier = mapServiceTier(this.config.serviceTier);
     const isModelGpt5 = model.startsWith('gpt-5');
     if (isModelGpt5) {
@@ -391,6 +427,12 @@ export class LLMClient {
           instructions: systemPrompt,
           input: userPrompt,
           max_output_tokens: tokenCap,
+          top_p: 1,
+          tools: [BEST_WORST_TOOL],
+          tool_choice: {
+            type: "function",
+            name: BEST_WORST_TOOL.name,
+          },
           ...(serviceTier ? { service_tier: serviceTier } : {}),
           ...(temperature != null ? { temperature } : {}),
         };
@@ -481,7 +523,7 @@ export class LLMClient {
   ): Promise<{ choice: "A" | "B"; debugTrace?: { request: Record<string, unknown>; response: Record<string, unknown> } }> {
     const model = this.config.model ?? 'gpt-4.1-mini-2025-04-14';
     let tokenCap = this.config.maxOutputTokens ?? 600;
-    let temperature = normalizeTemperature(this.config.temperature, model);
+    let temperature = normalizeTemperature(this.config.temperature);
     let serviceTier = mapServiceTier(this.config.serviceTier);
     const systemPrompt = buildSystemPrompt(persona);
     const prompt = buildCalibrationPrompt({
@@ -501,6 +543,12 @@ export class LLMClient {
           instructions: systemPrompt,
           input: prompt,
           max_output_tokens: tokenCap,
+          top_p: 1,
+          tools: [FEATURE_CASH_TOOL],
+          tool_choice: {
+            type: "function",
+            name: FEATURE_CASH_TOOL.name,
+          },
           ...(serviceTier ? { service_tier: serviceTier } : {}),
           ...(temperature != null ? { temperature } : {}),
         };

@@ -26,7 +26,9 @@ import {
   RawResponse,
   type CalibrationAdjustmentStrategy,
   type CalibrationResult,
+  type MoneySignalDiagnostics,
   type PersonaAnalysisSummary,
+  type StabilityGateStatus,
 } from "@/lib/maxdiff-engine";
 import { buildSystemPrompt, buildUserPrompt, LLMClient } from "@/lib/llm-client";
 import { usePersonas } from "@/personas/store";
@@ -57,8 +59,13 @@ import {
   fitBwsMnlMoney,
   topFeaturesByWtp,
 } from "@/domain/analysis/estimation/bwsMnl";
-import { extendNearBIBDDesign } from "@/domain/analysis/design/maxdiffDesign";
 import { runFeatureCashCalibrationSearch } from "@/domain/analysis/calibration/featureCashCalibration";
+import { wtpFromUtility } from "@/domain/analysis/wtp";
+import {
+  computeExposureTaskPlan,
+  displayWtpFromRaw,
+  evaluateStabilityGates,
+} from "@/domain/analysis/stability";
 
 interface Feature {
   id: string;
@@ -171,12 +178,22 @@ const buildEngineFeatures = (items: Feature[]) => {
 
 const buildAnalysisPlan = (
   engineFeatures: ReturnType<typeof buildEngineFeatures>,
-  voucherBounds: { min_discount: number; max_discount: number; levels: number },
+  voucherBounds: { min_discount: number; max_discount: number; levels: number; spacing?: "log" | "linear"; include_zero?: boolean },
   settings: AnalysisSettings
 ) => {
   const featureCosts = engineFeatures.map((feature) => feature.materialCost);
   const vouchers = MaxDiffEngine.generateVouchers(featureCosts, voucherBounds);
-  const r = Math.max(3, Math.min(8, Math.ceil((engineFeatures.length + vouchers.length) / 3)));
+  const exposurePlan = computeExposureTaskPlan({
+    featureCount: engineFeatures.length,
+    voucherLevelCount: vouchers.length,
+    targetFeatureExposures: settings.targetFeatureExposures,
+    targetVoucherExposuresPerLevel: settings.targetVoucherExposuresPerLevel,
+    repeatFraction: settings.repeatTaskFraction,
+    featuresPerTask: 3,
+    minTasksFloor: 60,
+    maxTasksCap: settings.stabilizeToTarget ? settings.stabilityMaxTasks : undefined,
+  });
+  const r = Math.max(1, exposurePlan.recommendedRTarget);
   const generated = MaxDiffEngine.generateMaxDiffPlan(engineFeatures, vouchers, {
     r,
     itemsPerSet: 4,
@@ -202,6 +219,7 @@ const buildAnalysisPlan = (
     r,
     itemsPerSet: 4,
     featureDescMap,
+    exposurePlan,
   };
 };
 
@@ -218,11 +236,77 @@ const buildAnalysisConfigFingerprint = (settings: AnalysisSettings) =>
     settings.stabilityTopN,
     settings.stabilityBatchSize,
     settings.stabilityMaxTasks,
+    settings.targetFeatureExposures,
+    settings.targetVoucherExposuresPerLevel,
+    settings.minRepeatTasks,
     settings.enableCalibration,
     settings.calibrationFeatureCount,
     settings.calibrationSteps,
     settings.calibrationStrategy,
   ].join("|");
+
+const formatAmountLabel = (amount: number) => `$${Number(amount.toFixed(2)).toLocaleString()}`;
+
+const MAX_FAILURE_RATE_FOR_STABILITY = 0.02;
+const MIN_REPEATABILITY_FOR_STABILITY = 0.8;
+
+const buildExposureDiagnostics = (
+  sets: MaxDiffSet[],
+  responses: RawResponse[],
+  featureIds: string[],
+  vouchers: Array<{ id: string; amount: number }>
+) => {
+  const setById = new Map(sets.map((set) => [set.id, set]));
+  const featureIdSet = new Set(featureIds);
+  const voucherIdSet = new Set(vouchers.map((voucher) => voucher.id));
+  const voucherAmountById = new Map(vouchers.map((voucher) => [voucher.id, voucher.amount]));
+  const featureAppearances = new Map(featureIds.map((id) => [id, 0]));
+  const voucherAppearances = new Map(vouchers.map((voucher) => [voucher.id, 0]));
+  const validResponses = responses.filter((response) => !response.failed);
+  let answeredTasks = 0;
+  let voucherBestCount = 0;
+  let voucherWorstCount = 0;
+
+  validResponses.forEach((response) => {
+    const set = setById.get(response.setId);
+    if (!set) return;
+    answeredTasks++;
+    set.options.forEach((option) => {
+      if (featureIdSet.has(option.id)) {
+        featureAppearances.set(option.id, (featureAppearances.get(option.id) ?? 0) + 1);
+      } else if (voucherIdSet.has(option.id)) {
+        voucherAppearances.set(option.id, (voucherAppearances.get(option.id) ?? 0) + 1);
+      }
+    });
+    if (voucherIdSet.has(response.mostValued)) voucherBestCount++;
+    if (voucherIdSet.has(response.leastValued)) voucherWorstCount++;
+  });
+
+  const voucherChosenCount = voucherBestCount + voucherWorstCount;
+  const denominator = Math.max(1, answeredTasks);
+  const voucherLevelCounts: Record<string, number> = {};
+  voucherAppearances.forEach((count, voucherId) => {
+    const amount = voucherAmountById.get(voucherId) ?? 0;
+    voucherLevelCounts[formatAmountLabel(amount)] = count;
+  });
+
+  const moneySignal: MoneySignalDiagnostics = {
+    voucherBestCount,
+    voucherWorstCount,
+    voucherChosenCount,
+    voucherBestRate: voucherBestCount / denominator,
+    voucherWorstRate: voucherWorstCount / denominator,
+    voucherChosenRate: voucherChosenCount / denominator,
+    voucherLevelCounts,
+  };
+
+  return {
+    answeredTasks,
+    featureAppearances,
+    voucherAppearances,
+    moneySignal,
+  };
+};
 
 export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, onAnalysisComplete, onEditAnalysisParameters }: MaxDiffAnalysisProps) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -479,6 +563,9 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                 designDiagnostics: estimatedPlan.designDiagnostics,
                 repeatability: {
                   totalRepeatPairs: 0,
+                  bestAgreementCount: 0,
+                  worstAgreementCount: 0,
+                  jointAgreementCount: 0,
                   bestAgreementRate: 0,
                   worstAgreementRate: 0,
                   jointAgreementRate: 0,
@@ -515,6 +602,9 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                 designDiagnostics: estimatedPlan.designDiagnostics,
                 repeatability: {
                   totalRepeatPairs: 0,
+                  bestAgreementCount: 0,
+                  worstAgreementCount: 0,
+                  jointAgreementCount: 0,
                   bestAgreementRate: 0,
                   worstAgreementRate: 0,
                   jointAgreementRate: 0,
@@ -566,7 +656,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
             serviceTier: storedModelConfig.serviceTier,
             maxRetries: analysisSettings.maxRetries,
             useGPT: true,
-            temperature: analysisSettings.temperature,
+            temperature: 0,
           });
 
       const voucherBounds = voucherPolicyBounds;
@@ -606,21 +696,6 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         name: vehicle.name,
         description: vehicle.description ?? undefined,
       };
-      const optionById = new Map<string, { id: string; name: string; description?: string }>();
-      engineFeatures.forEach((feature) => {
-        optionById.set(feature.id, {
-          id: feature.id,
-          name: feature.name,
-          description: feature.description,
-        });
-      });
-      analysisPlan.vouchers.forEach((voucher) => {
-        optionById.set(voucher.id, {
-          id: voucher.id,
-          name: `Voucher (${voucher.amount})`,
-          description: voucher.description,
-        });
-      });
 
       for (const personaId of selectedPersonas) {
         const personaName = getPersonaName(personaId);
@@ -754,17 +829,29 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         let lastBootstrap: ReturnType<typeof bootstrapBwsMnlMoney> | null = null;
         const computePersonaResult = () => {
           const repeatability = computeRepeatability(personaSets, responses);
+          const exposure = buildExposureDiagnostics(
+            personaSets,
+            responses,
+            engineFeatures.map((feature) => feature.id),
+            analysisPlan.vouchers
+          );
           const failedTaskCount = responses.filter((response) => response.failed).length;
           if (analysisSettings.estimator === "legacy_score") {
             const perceivedValues = MaxDiffEngine.computePerceivedValues(responses, engineFeatures, analysisPlan.vouchers)
-              .map((row) => ({
-                ...row,
-                rawWtp: row.perceivedValue,
-                adjustedWtp: row.perceivedValue,
-                ciLower95: row.perceivedValue,
-                ciUpper95: row.perceivedValue,
-                adjustmentSource: "model" as const,
-              }));
+              .map((row) => {
+                const rawWtp = row.perceivedValue;
+                const displayWtp = displayWtpFromRaw(rawWtp, false);
+                return {
+                  ...row,
+                  perceivedValue: Number(displayWtp.toFixed(2)),
+                  rawWtp: Number(rawWtp.toFixed(2)),
+                  adjustedWtp: Number(rawWtp.toFixed(2)),
+                  displayWtp: Number(displayWtp.toFixed(2)),
+                  ciLower95: Number(rawWtp.toFixed(2)),
+                  ciUpper95: Number(rawWtp.toFixed(2)),
+                  adjustmentSource: "model" as const,
+                };
+              });
 
             const summary: PersonaAnalysisSummary = {
               designMode: analysisPlan.designMode,
@@ -773,6 +860,8 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
               beta: null,
               designDiagnostics,
               repeatability,
+              answeredTaskCount: exposure.answeredTasks,
+              moneySignal: exposure.moneySignal,
               failedTaskCount,
               totalTaskCount: responses.length,
               failureRate: responses.length > 0 ? failedTaskCount / responses.length : 0,
@@ -782,16 +871,21 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                   row.featureId,
                   {
                     utility: row.netScore,
-                    rawWtp: row.perceivedValue,
-                    adjustedWtp: row.perceivedValue,
-                    ciLower95: row.perceivedValue,
-                    ciUpper95: row.perceivedValue,
+                    rawWtp: row.rawWtp ?? row.perceivedValue,
+                    adjustedWtp: row.adjustedWtp ?? row.perceivedValue,
+                    ciLower95: row.ciLower95 ?? row.perceivedValue,
+                    ciUpper95: row.ciUpper95 ?? row.perceivedValue,
                     adjustmentSource: "model" as const,
                   },
                 ])
               ),
             };
-            return { perceivedValues, summary };
+            return {
+              perceivedValues,
+              summary,
+              repeatability,
+              exposure,
+            };
           }
 
           const fit = fitBwsMnlMoney(personaSets, responses, engineFeatures, analysisPlan.vouchers, {
@@ -821,7 +915,8 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
           const perceivedValues = engineFeatures
             .map((feature) => {
               const utility = fit.utilityByFeature[feature.id] ?? 0;
-              const rawWtp = fit.rawWtpByFeature[feature.id] ?? 0;
+              const rawWtp = wtpFromUtility(utility, fit.beta, analysisSettings.moneyTransform);
+              const displayWtp = displayWtpFromRaw(rawWtp, false);
               const bootstrapStats = bootstrap.byFeature[feature.id];
               const ciLower95 = bootstrapStats?.p2_5 ?? rawWtp;
               const ciUpper95 = bootstrapStats?.p97_5 ?? rawWtp;
@@ -829,11 +924,12 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                 featureId: feature.id,
                 featureName: feature.name,
                 materialCost: feature.materialCost,
-                perceivedValue: Number(rawWtp.toFixed(2)),
+                perceivedValue: Number(displayWtp.toFixed(2)),
                 netScore: Number(utility.toFixed(6)),
                 utility: Number(utility.toFixed(6)),
                 rawWtp: Number(rawWtp.toFixed(2)),
                 adjustedWtp: Number(rawWtp.toFixed(2)),
+                displayWtp: Number(displayWtp.toFixed(2)),
                 ciLower95: Number(ciLower95.toFixed(2)),
                 ciUpper95: Number(ciUpper95.toFixed(2)),
                 bootstrapMean: bootstrapStats ? Number(bootstrapStats.mean.toFixed(2)) : undefined,
@@ -852,6 +948,8 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
             beta: fit.beta,
             designDiagnostics,
             repeatability,
+            answeredTaskCount: exposure.answeredTasks,
+            moneySignal: exposure.moneySignal,
             failedTaskCount: fit.failedTaskCount,
             totalTaskCount: responses.length,
             failureRate: responses.length > 0 ? fit.failedTaskCount / responses.length : 0,
@@ -871,12 +969,19 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
               ])
             ),
           };
-          return { perceivedValues, summary };
+          return {
+            perceivedValues,
+            summary,
+            repeatability,
+            exposure,
+          };
         };
 
         let personaResult = computePersonaResult();
         let stabilityChecks: ReturnType<typeof evaluateStabilityChecks> = [];
-        let stabilitySatisfied = true;
+        let stabilityGates: StabilityGateStatus | null = null;
+        let stabilitySatisfied = false;
+        let stopReason: "maxTasksReached" | "stabilityPass" | "userCancelled" | undefined;
         const stabilizationEnabled =
           analysisSettings.stabilizeToTarget &&
           analysisSettings.estimator === "bws_mnl_money" &&
@@ -885,14 +990,43 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         if (stabilizationEnabled) {
           while (true) {
             if (!lastFit || !lastBootstrap) break;
-            const topIds = topFeaturesByWtp(lastFit.rawWtpByFeature, analysisSettings.stabilityTopN);
-            stabilityChecks = evaluateStabilityChecks(
-              topIds,
-              lastBootstrap.byFeature,
-              analysisSettings.stabilityTargetPercent / 100
-            );
-            stabilitySatisfied = stabilityChecks.length > 0 && stabilityChecks.every((check) => check.pass);
-            if (stabilitySatisfied || personaSets.length >= analysisSettings.stabilityMaxTasks) break;
+            stabilityGates = evaluateStabilityGates({
+              answeredTasks: personaResult.exposure.answeredTasks,
+              repeatTasksAnswered: personaResult.repeatability.totalRepeatPairs,
+              jointRepeatability: personaResult.repeatability.jointAgreementRate,
+              failureRate: personaResult.summary.failureRate,
+              featureAppearances: personaResult.exposure.featureAppearances,
+              voucherAppearances: personaResult.exposure.voucherAppearances,
+              thresholds: {
+                minTasksBeforeStability: analysisPlan.exposurePlan.minTasks,
+                minFeatureAppearances: analysisSettings.targetFeatureExposures,
+                minVoucherAppearances: analysisSettings.targetVoucherExposuresPerLevel,
+                minRepeatTasks: analysisSettings.minRepeatTasks,
+                minRepeatability: MIN_REPEATABILITY_FOR_STABILITY,
+                maxFailureRate: MAX_FAILURE_RATE_FOR_STABILITY,
+              },
+            });
+            if (stabilityGates.gatesMet) {
+              const topIds = topFeaturesByWtp(lastFit.rawWtpByFeature, analysisSettings.stabilityTopN);
+              stabilityChecks = evaluateStabilityChecks(
+                topIds,
+                lastBootstrap.byFeature,
+                analysisSettings.stabilityTargetPercent / 100
+              );
+              stabilitySatisfied = stabilityChecks.length > 0 && stabilityChecks.every((check) => check.pass);
+            } else {
+              stabilityChecks = [];
+              stabilitySatisfied = false;
+            }
+
+            if (stabilitySatisfied) {
+              stopReason = "stabilityPass";
+              break;
+            }
+            if (personaSets.length >= analysisSettings.stabilityMaxTasks) {
+              stopReason = "maxTasksReached";
+              break;
+            }
 
             const remaining = analysisSettings.stabilityMaxTasks - personaSets.length;
             const batchSize = Math.min(analysisSettings.stabilityBatchSize, remaining);
@@ -904,35 +1038,19 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
               );
             }
 
-            const existingBlocks = personaSets.map((set) => ({
-              id: set.id,
-              itemIds: set.options.map((option) => option.id),
-            }));
-            const extended = extendNearBIBDDesign(
-              Array.from(optionById.keys()),
-              4,
-              existingBlocks,
-              batchSize,
-              analysisSettings.designSeed + batchesAdded + 701,
-              { improvementIterations: 450 }
-            );
-            const newBlocks = extended.blocks.slice(existingBlocks.length);
-            if (newBlocks.length === 0) break;
-
-            const newSets: MaxDiffSet[] = newBlocks.map((block) => ({
-              id: block.id,
-              options: block.itemIds
-                .map((itemId) => optionById.get(itemId))
-                .filter(Boolean)
-                .map((option) => ({
-                  id: option!.id,
-                  name: option!.name,
-                  description: option!.description,
-                })),
-            }));
+            const extended = MaxDiffEngine.extendMaxDiffPlan(personaSets, engineFeatures, analysisPlan.vouchers, {
+              additionalTasks: batchSize,
+              itemsPerSet: 4,
+              designMode: analysisSettings.designMode,
+              seed: analysisSettings.designSeed + batchesAdded + 701,
+              repeatFraction: analysisSettings.repeatTaskFraction,
+              improvementIterations: 450,
+            });
+            const newSets = extended.maxDiffSets.slice(personaSets.length);
+            if (newSets.length === 0) break;
 
             const startIndex = personaSets.length;
-            personaSets = [...personaSets, ...newSets];
+            personaSets = extended.maxDiffSets;
             designDiagnostics = extended.diagnostics;
             batchesAdded++;
 
@@ -944,25 +1062,61 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
           }
 
           if (lastFit && lastBootstrap) {
-            const topIds = topFeaturesByWtp(lastFit.rawWtpByFeature, analysisSettings.stabilityTopN);
-            stabilityChecks = evaluateStabilityChecks(
-              topIds,
-              lastBootstrap.byFeature,
-              analysisSettings.stabilityTargetPercent / 100
-            );
-            stabilitySatisfied = stabilityChecks.length > 0 && stabilityChecks.every((check) => check.pass);
+            stabilityGates = evaluateStabilityGates({
+              answeredTasks: personaResult.exposure.answeredTasks,
+              repeatTasksAnswered: personaResult.repeatability.totalRepeatPairs,
+              jointRepeatability: personaResult.repeatability.jointAgreementRate,
+              failureRate: personaResult.summary.failureRate,
+              featureAppearances: personaResult.exposure.featureAppearances,
+              voucherAppearances: personaResult.exposure.voucherAppearances,
+              thresholds: {
+                minTasksBeforeStability: analysisPlan.exposurePlan.minTasks,
+                minFeatureAppearances: analysisSettings.targetFeatureExposures,
+                minVoucherAppearances: analysisSettings.targetVoucherExposuresPerLevel,
+                minRepeatTasks: analysisSettings.minRepeatTasks,
+                minRepeatability: MIN_REPEATABILITY_FOR_STABILITY,
+                maxFailureRate: MAX_FAILURE_RATE_FOR_STABILITY,
+              },
+            });
+            if (stabilityGates.gatesMet) {
+              const topIds = topFeaturesByWtp(lastFit.rawWtpByFeature, analysisSettings.stabilityTopN);
+              stabilityChecks = evaluateStabilityChecks(
+                topIds,
+                lastBootstrap.byFeature,
+                analysisSettings.stabilityTargetPercent / 100
+              );
+              stabilitySatisfied = stabilityChecks.length > 0 && stabilityChecks.every((check) => check.pass);
+            } else {
+              stabilityChecks = [];
+              stabilitySatisfied = false;
+            }
+          }
+          if (!stopReason) {
+            stopReason = stabilitySatisfied ? "stabilityPass" : "maxTasksReached";
           }
         }
 
         if (analysisSettings.estimator === "bws_mnl_money" && personaResult.summary.estimator === "bws_mnl_money") {
+          const statusLabel = !stabilizationEnabled
+            ? "pass"
+            : !stabilityGates?.gatesMet
+              ? "pending"
+              : stabilitySatisfied
+                ? "pass"
+                : "not_reached";
+
+          personaResult.summary.stopReason = stopReason;
           personaResult.summary.stabilization = {
             enabled: stabilizationEnabled,
             targetRelativeHalfWidth: analysisSettings.stabilityTargetPercent / 100,
             topN: analysisSettings.stabilityTopN,
             maxTasks: analysisSettings.stabilityMaxTasks,
-            tasksUsed: personaSets.length,
+            tasksUsed: personaResult.exposure.answeredTasks,
             batchesAdded,
             isStable: stabilizationEnabled ? stabilitySatisfied : true,
+            statusLabel,
+            stopReason,
+            gates: stabilityGates ?? undefined,
             checks: stabilityChecks.map((check) => ({
               featureId: check.featureId,
               mean: check.mean,
@@ -1087,8 +1241,9 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
               }
               const next: PerceivedValue = {
                 ...row,
-                perceivedValue: Number(adjusted.toFixed(2)),
+                perceivedValue: Number(displayWtpFromRaw(adjusted, false).toFixed(2)),
                 adjustedWtp: Number(adjusted.toFixed(2)),
+                displayWtp: Number(displayWtpFromRaw(adjusted, false).toFixed(2)),
                 adjustmentSource: source,
                 calibrationLower: calibration?.calibrationLower,
                 calibrationUpper: calibration?.calibrationUpper,
@@ -1240,8 +1395,10 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                 <Ticket className="h-3.5 w-3.5" />
                 Vouchers
               </p>
-              <p className="text-sm font-semibold">{voucherPolicyBounds.levels} levels</p>
-              <p className="text-xs text-muted-foreground">Low ${voucherPolicyBounds.min_discount} · High ${voucherPolicyBounds.max_discount}</p>
+              <p className="text-sm font-semibold">{estimatedPlan.vouchers.length} levels</p>
+              <p className="text-xs text-muted-foreground">
+                {estimatedPlan.vouchers.map((voucher) => `$${voucher.amount}`).join(", ")}
+              </p>
             </div>
 
             <div className="rounded-lg border border-border-subtle bg-surface p-3 shadow-subtle transition-colors hover:bg-muted/35">
@@ -1277,6 +1434,17 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
         </CardContent>
       </Card>
 
+      {analysisSettings.stabilizeToTarget && estimatedPlan.exposurePlan.capBelowRequired && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Stability cap below required minimum</AlertTitle>
+          <AlertDescription>
+            Stability gates require at least {estimatedPlan.exposurePlan.minTasks} answered tasks, but Max tasks is set
+            to {analysisSettings.stabilityMaxTasks}. Stability pass will remain pending unless you increase Max tasks.
+          </AlertDescription>
+        </Alert>
+      )}
+
       {estimatedPlan.designDiagnostics && (
         <Card className="w-full">
           <CardHeader className="pb-3">
@@ -1288,7 +1456,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-0">
-            <div className="grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-5">
               <div className="rounded-md border border-border-subtle bg-muted/20 p-3">
                 <p className="font-medium">Item count</p>
                 <p className="text-muted-foreground">
@@ -1323,6 +1491,27 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                   pair Δ {estimatedPlan.designDiagnostics.pairCountImbalance.toFixed(0)}
                 </p>
               </div>
+              {estimatedPlan.designDiagnostics.voucherSummary && (
+                <div className="rounded-md border border-border-subtle bg-muted/20 p-3">
+                  <p className="font-medium">Voucher exposure</p>
+                  <p className="text-muted-foreground">
+                    min {estimatedPlan.designDiagnostics.voucherSummary.min.toFixed(0)} · mean{" "}
+                    {estimatedPlan.designDiagnostics.voucherSummary.mean.toFixed(2)} · max{" "}
+                    {estimatedPlan.designDiagnostics.voucherSummary.max.toFixed(0)}
+                  </p>
+                  <p className="text-muted-foreground">
+                    coverage {((estimatedPlan.designDiagnostics.voucherCoverage ?? 0) * 100).toFixed(1)}%
+                  </p>
+                  <p className="text-muted-foreground">
+                    {estimatedPlan.vouchers
+                      .map((voucher) => {
+                        const count = estimatedPlan.designDiagnostics?.voucherCounts?.[voucher.id] ?? 0;
+                        return `${formatAmountLabel(voucher.amount)}x${count}`;
+                      })
+                      .join(", ")}
+                  </p>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

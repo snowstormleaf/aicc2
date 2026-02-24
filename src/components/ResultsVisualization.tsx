@@ -3,6 +3,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   ScatterChart,
@@ -76,6 +78,7 @@ const getNiceAxisMax = (value: number) => {
 export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVisualizationProps) => {
   const [showDetails, setShowDetails] = useState(false);
   const [hideMaterialCost, setHideMaterialCost] = useState(() => getStoredAnalysisSettings().hideMaterialCost);
+  const [allowNegativeWtp, setAllowNegativeWtp] = useState(false);
   const [parityPercent, setParityPercent] = useState<number[]>([100]);
 
   const personas = useMemo(() => Array.from(results.keys()), [results]);
@@ -86,6 +89,25 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
 
   const [personaA, setPersonaA] = useState<string>(personas[0] ?? "");
   const [personaB, setPersonaB] = useState<string>(personas[1] ?? "");
+
+  const displayedResults = useMemo(() => {
+    const map = new Map<string, PerceivedValue[]>();
+    for (const [persona, rows] of results.entries()) {
+      map.set(
+        persona,
+        rows.map((row) => {
+          const displayValue = allowNegativeWtp
+            ? (row.adjustedWtp ?? row.rawWtp ?? row.perceivedValue)
+            : (row.displayWtp ?? Math.max(0, row.perceivedValue));
+          return {
+            ...row,
+            perceivedValue: displayValue,
+          };
+        })
+      );
+    }
+    return map;
+  }, [allowNegativeWtp, results]);
 
   useEffect(() => {
     const sync = () => {
@@ -125,7 +147,7 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
 
   const allData = useMemo(() => {
     const points: ScatterPoint[] = [];
-    for (const [persona, perceivedValues] of results.entries()) {
+    for (const [persona, perceivedValues] of displayedResults.entries()) {
       for (const result of perceivedValues) {
         points.push({
           featureId: result.featureId,
@@ -138,7 +160,7 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
       }
     }
     return points;
-  }, [results]);
+  }, [displayedResults]);
 
   const byPersona = useMemo(() => {
     const map = new Map<string, ScatterPoint[]>();
@@ -151,7 +173,7 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
   const valueOnlyData = useMemo(() => {
     const featureMap = new Map<string, ValueOnlyRow>();
 
-    for (const [persona, perceivedValues] of results.entries()) {
+    for (const [persona, perceivedValues] of displayedResults.entries()) {
       const seriesKey = valueOnlySeries.find((series) => series.persona === persona)?.key;
       if (!seriesKey) continue;
 
@@ -185,21 +207,23 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
           Math.max(1, valueOnlySeries.length),
       }))
       .sort((a, b) => Number(b.averageValue) - Number(a.averageValue));
-  }, [results, valueOnlySeries]);
+  }, [displayedResults, valueOnlySeries]);
 
   const maxMaterialCost = allData.length ? Math.max(...allData.map((d) => d.materialCost)) : 1;
   const maxPerceivedValue = allData.length ? Math.max(...allData.map((d) => d.perceivedValue)) : 1;
+  const minPerceivedValue = allData.length ? Math.min(...allData.map((d) => d.perceivedValue)) : 0;
   const xAxisMax = getNiceAxisMax(maxMaterialCost * 1.05);
   const yAxisMax = getNiceAxisMax(maxPerceivedValue * 1.05);
+  const yAxisMin = minPerceivedValue < 0 ? -getNiceAxisMax(Math.abs(minPerceivedValue) * 1.05) : 0;
   const paritySlope = Math.max(0.01, (parityPercent[0] ?? 100) / 100);
   const parityMaxX = Math.min(xAxisMax, yAxisMax / paritySlope);
 
   const differenceData = useMemo(() => {
     if (!personaA || !personaB || personaA === personaB) return [];
-    const persona1Results = results.get(personaA) ?? [];
-    const persona2Results = results.get(personaB) ?? [];
+    const persona1Results = displayedResults.get(personaA) ?? [];
+    const persona2Results = displayedResults.get(personaB) ?? [];
     return buildDifferenceData(persona1Results, persona2Results);
-  }, [personaA, personaB, results]);
+  }, [displayedResults, personaA, personaB]);
 
   const valueOnlyAxisLayout = useMemo(
     () => buildAxisLayout(valueOnlyData.map((row) => row.featureName)),
@@ -250,7 +274,7 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
 
   const downloadResults = () => {
     let csvContent =
-      "Persona,Feature ID,Feature Name,Material Cost (USD),Perceived Value (USD),Raw Model WTP (USD),Adjusted WTP (USD),Utility,CI 2.5%,CI 97.5%,Bootstrap Mean,Bootstrap Median,Bootstrap CV,Relative CI Width,Adjustment Source,Calibration Mid,Calibration Lower,Calibration Upper,Beta,Transform,Estimator,Design Mode,Repeatability Joint,Failure Rate,Design Item CV,Design Pair CV,Pair Coverage,Calibration Strategy,Calibration Scale,Value Ratio,Category\n";
+      "Persona,Feature ID,Feature Name,Material Cost (USD),Perceived Value (USD),Raw Model WTP (USD),Adjusted WTP (USD),Utility,CI 2.5%,CI 97.5%,Bootstrap Mean,Bootstrap Median,Bootstrap CV,Relative CI Width,Adjustment Source,Calibration Mid,Calibration Lower,Calibration Upper,Beta,Transform,Estimator,Design Mode,Repeatability Joint,Repeatability Joint Matches,Repeatability Total Pairs,Failure Rate,Design Item CV,Design Pair CV,Pair Coverage,Voucher Best Rate,Voucher Worst Rate,Voucher Chosen Rate,Voucher Level Counts,Stability Status,Stop Reason,Calibration Strategy,Calibration Scale,Value Ratio,Category\n";
 
     for (const [persona, perceivedValues] of results.entries()) {
       const summary = summaries.get(persona);
@@ -284,10 +308,18 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
               `"${summary?.estimator ?? ""}"`,
               `"${summary?.designMode ?? ""}"`,
               summary?.repeatability ? Number(summary.repeatability.jointAgreementRate.toFixed(4)) : "",
+              summary?.repeatability ? summary.repeatability.jointAgreementCount : "",
+              summary?.repeatability ? summary.repeatability.totalRepeatPairs : "",
               summary?.failureRate != null ? Number(summary.failureRate.toFixed(4)) : "",
               summary?.designDiagnostics ? Number(summary.designDiagnostics.itemSummary.cv.toFixed(4)) : "",
               summary?.designDiagnostics ? Number(summary.designDiagnostics.pairSummary.observedPairs.cv.toFixed(4)) : "",
               summary?.designDiagnostics ? Number(summary.designDiagnostics.pairSummary.coverage.toFixed(4)) : "",
+              summary?.moneySignal != null ? Number(summary.moneySignal.voucherBestRate.toFixed(4)) : "",
+              summary?.moneySignal != null ? Number(summary.moneySignal.voucherWorstRate.toFixed(4)) : "",
+              summary?.moneySignal != null ? Number(summary.moneySignal.voucherChosenRate.toFixed(4)) : "",
+              `"${summary?.moneySignal ? JSON.stringify(summary.moneySignal.voucherLevelCounts) : ""}"`,
+              `"${summary?.stabilization?.statusLabel ?? ""}"`,
+              `"${summary?.stopReason ?? summary?.stabilization?.stopReason ?? ""}"`,
               `"${summary?.calibration?.strategy ?? ""}"`,
               summary?.calibration ? Number(summary.calibration.scaleFactor.toFixed(6)) : "",
               ratioLabel,
@@ -380,11 +412,19 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
         "Money transform",
         "Beta",
         "Repeatability joint",
+        "Repeatability joint matches",
+        "Repeatability total pairs",
         "Failure rate",
         "Design mode",
         "Item CV",
         "Pair CV",
         "Pair coverage",
+        "Voucher best rate",
+        "Voucher worst rate",
+        "Voucher chosen rate",
+        "Voucher level counts",
+        "Stability status",
+        "Stop reason",
         "Calibration enabled",
         "Calibration strategy",
         "Calibration scale",
@@ -398,11 +438,19 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
         summary?.moneyTransform ?? "",
         summary?.beta ?? "",
         summary?.repeatability?.jointAgreementRate ?? "",
+        summary?.repeatability?.jointAgreementCount ?? "",
+        summary?.repeatability?.totalRepeatPairs ?? "",
         summary?.failureRate ?? "",
         summary?.designMode ?? "",
         summary?.designDiagnostics?.itemSummary.cv ?? "",
         summary?.designDiagnostics?.pairSummary.observedPairs.cv ?? "",
         summary?.designDiagnostics?.pairSummary.coverage ?? "",
+        summary?.moneySignal?.voucherBestRate ?? "",
+        summary?.moneySignal?.voucherWorstRate ?? "",
+        summary?.moneySignal?.voucherChosenRate ?? "",
+        summary?.moneySignal ? JSON.stringify(summary.moneySignal.voucherLevelCounts) : "",
+        summary?.stabilization?.statusLabel ?? "",
+        summary?.stopReason ?? summary?.stabilization?.stopReason ?? "",
         summary?.calibration?.enabled ? "yes" : "no",
         summary?.calibration?.strategy ?? "",
         summary?.calibration?.scaleFactor ?? "",
@@ -519,6 +567,12 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
               </CardDescription>
             </div>
             <div className="flex gap-2">
+              <div className="mr-2 flex items-center gap-2 rounded-md border border-border-subtle px-3 py-1.5">
+                <Switch id="allow-negative-wtp" checked={allowNegativeWtp} onCheckedChange={setAllowNegativeWtp} />
+                <Label htmlFor="allow-negative-wtp" className="cursor-pointer text-xs">
+                  Allow negative WTP
+                </Label>
+              </div>
               <Button onClick={downloadResults} variant="outline" size="sm">
                 <Download className="mr-2 h-4 w-4" />
                 Export CSV
@@ -540,6 +594,18 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
               {personas.map((persona) => {
                 const summary = summaries.get(persona);
                 const stability = summary?.stabilization;
+                const repeatPairs = summary?.repeatability?.totalRepeatPairs ?? 0;
+                const repeatJoint = summary?.repeatability?.jointAgreementCount ?? 0;
+                const repeatRate = summary?.repeatability?.jointAgreementRate ?? 0;
+                const repeatabilityLabel =
+                  repeatPairs < 2
+                    ? "Repeatability N/A (insufficient repeats)"
+                    : `Repeatability ${repeatJoint}/${repeatPairs} (${(repeatRate * 100).toFixed(1)}%)`;
+                const voucherExposureValues = summary?.moneySignal
+                  ? Object.values(summary.moneySignal.voucherLevelCounts)
+                  : [];
+                const voucherExposureMin = voucherExposureValues.length > 0 ? Math.min(...voucherExposureValues) : 0;
+                const voucherExposureMax = voucherExposureValues.length > 0 ? Math.max(...voucherExposureValues) : 0;
                 return (
                   <div key={`${persona}-summary`} className="rounded-md border border-border-subtle bg-background/70 p-3 text-xs">
                     <p className="mb-1 font-semibold text-foreground">{persona}</p>
@@ -548,17 +614,44 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
                       {summary?.beta != null ? summary.beta.toFixed(4) : "n/a"}
                     </p>
                     <p className="text-muted-foreground">
-                      Repeatability {((summary?.repeatability?.jointAgreementRate ?? 0) * 100).toFixed(1)}% · Failure{" "}
-                      {((summary?.failureRate ?? 0) * 100).toFixed(1)}%
+                      {repeatabilityLabel} · Failure {((summary?.failureRate ?? 0) * 100).toFixed(1)}%
                     </p>
                     <p className="text-muted-foreground">
                       Pair coverage {((summary?.designDiagnostics?.pairSummary.coverage ?? 0) * 100).toFixed(1)}% · Item CV{" "}
                       {((summary?.designDiagnostics?.itemSummary.cv ?? 0) * 100).toFixed(1)}%
                     </p>
+                    {summary?.moneySignal && (
+                      <>
+                        <p className="text-muted-foreground">
+                          Voucher best {(summary.moneySignal.voucherBestRate * 100).toFixed(1)}% · worst{" "}
+                          {(summary.moneySignal.voucherWorstRate * 100).toFixed(1)}% · chosen{" "}
+                          {(summary.moneySignal.voucherChosenRate * 100).toFixed(1)}%
+                        </p>
+                        <p className="text-muted-foreground">
+                          Voucher levels{" "}
+                          {Object.entries(summary.moneySignal.voucherLevelCounts)
+                            .map(([voucherId, count]) => `${voucherId}:${count}`)
+                            .join(", ")}
+                        </p>
+                        <p className="text-muted-foreground">
+                          Voucher exposure min {voucherExposureMin} · max {voucherExposureMax}
+                        </p>
+                      </>
+                    )}
                     {stability && (
                       <p className="text-muted-foreground">
-                        Stability {stability.isStable ? "pass" : "not reached"} · tasks {stability.tasksUsed}/
-                        {stability.maxTasks}
+                        Stability{" "}
+                        {stability.statusLabel === "pending"
+                          ? "pending"
+                          : stability.isStable
+                            ? "pass"
+                            : "not reached"}{" "}
+                        · tasks {stability.tasksUsed}/{stability.maxTasks}
+                      </p>
+                    )}
+                    {stability?.gates && stability.statusLabel === "pending" && (
+                      <p className="text-muted-foreground">
+                        Gates pending: {stability.gates.reasons.join(" ")}
                       </p>
                     )}
                     {summary?.calibration?.enabled && (
@@ -589,7 +682,7 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
                       type="number"
                       dataKey="perceivedValue"
                       name="Perceived Value"
-                      domain={[0, yAxisMax]}
+                      domain={[yAxisMin, yAxisMax]}
                       tick={{ fontSize: 12 }}
                       tickFormatter={(value) => formatCurrencyInt(Number(value))}
                     />
@@ -803,7 +896,7 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
           <CardContent>
             <div className="space-y-6">
               {personas.map((persona) => {
-                const personaResults = results.get(persona) ?? [];
+                const personaResults = displayedResults.get(persona) ?? [];
                 return (
                   <div key={persona} className="space-y-2">
                     <h4 className="text-lg font-semibold">{persona}</h4>
