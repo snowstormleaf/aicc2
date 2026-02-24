@@ -3,7 +3,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
@@ -78,7 +77,6 @@ const getNiceAxisMax = (value: number) => {
 export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVisualizationProps) => {
   const [showDetails, setShowDetails] = useState(false);
   const [hideMaterialCost, setHideMaterialCost] = useState(() => getStoredAnalysisSettings().hideMaterialCost);
-  const [allowNegativeWtp, setAllowNegativeWtp] = useState(false);
   const [parityPercent, setParityPercent] = useState<number[]>([100]);
 
   const personas = useMemo(() => Array.from(results.keys()), [results]);
@@ -95,19 +93,14 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
     for (const [persona, rows] of results.entries()) {
       map.set(
         persona,
-        rows.map((row) => {
-          const displayValue = allowNegativeWtp
-            ? (row.adjustedWtp ?? row.rawWtp ?? row.perceivedValue)
-            : (row.displayWtp ?? Math.max(0, row.perceivedValue));
-          return {
-            ...row,
-            perceivedValue: displayValue,
-          };
-        })
+        rows.map((row) => ({
+          ...row,
+          perceivedValue: row.rawWtp ?? row.adjustedWtp ?? row.perceivedValue,
+        }))
       );
     }
     return map;
-  }, [allowNegativeWtp, results]);
+  }, [results]);
 
   useEffect(() => {
     const sync = () => {
@@ -274,7 +267,7 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
 
   const downloadResults = () => {
     let csvContent =
-      "Persona,Feature ID,Feature Name,Material Cost (USD),Perceived Value (USD),Raw Model WTP (USD),Adjusted WTP (USD),Utility,CI 2.5%,CI 97.5%,Bootstrap Mean,Bootstrap Median,Bootstrap CV,Relative CI Width,Adjustment Source,Calibration Mid,Calibration Lower,Calibration Upper,Beta,Transform,Estimator,Design Mode,Repeatability Joint,Repeatability Joint Matches,Repeatability Total Pairs,Failure Rate,Design Item CV,Design Pair CV,Pair Coverage,Voucher Best Rate,Voucher Worst Rate,Voucher Chosen Rate,Voucher Level Counts,Stability Status,Stop Reason,Calibration Strategy,Calibration Scale,Value Ratio,Category\n";
+      "Persona,Feature ID,Feature Name,Material Cost (USD),Perceived Value (USD),Raw Model WTP (model units),Raw Model WTP (currency),Adjusted WTP (USD),Utility,CI 2.5% (USD),CI 97.5% (USD),Bootstrap Mean (USD),Bootstrap Median (USD),Bootstrap CV,Relative CI Width,Adjustment Source,Calibration Mid,Calibration Lower,Calibration Upper,Beta,Money scale,Transform,Estimator,Design Mode,Planned tasks,Answered tasks,Used in fit tasks,Repeatability Joint,Repeatability Joint Matches,Repeatability Total Pairs,Failure Rate,Design Item CV,Design Pair CV,Pair Coverage,Voucher Best Rate,Voucher Worst Rate,Voucher Chosen Rate,Voucher Level Counts,Stability Status,Stop Reason,Calibration Strategy,Calibration Scale,Value Ratio,Category\n";
 
     for (const [persona, perceivedValues] of results.entries()) {
       const summary = summaries.get(persona);
@@ -290,6 +283,7 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
               `"${r.featureName}"`,
               Number(r.materialCost.toFixed(2)),
               Number(r.perceivedValue.toFixed(2)),
+              r.rawModelWtp != null ? Number(r.rawModelWtp.toFixed(4)) : "",
               r.rawWtp != null ? Number(r.rawWtp.toFixed(2)) : "",
               r.adjustedWtp != null ? Number(r.adjustedWtp.toFixed(2)) : "",
               r.utility != null ? Number(r.utility.toFixed(6)) : "",
@@ -304,9 +298,13 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
               r.calibrationLower != null ? Number(r.calibrationLower.toFixed(2)) : "",
               r.calibrationUpper != null ? Number(r.calibrationUpper.toFixed(2)) : "",
               summary?.beta != null ? Number(summary.beta.toFixed(6)) : "",
+              summary?.moneyScale ?? "",
               `"${summary?.moneyTransform ?? ""}"`,
               `"${summary?.estimator ?? ""}"`,
               `"${summary?.designMode ?? ""}"`,
+              summary?.plannedTaskCount ?? "",
+              summary?.answeredTaskCount ?? "",
+              summary?.usedInFitTaskCount ?? "",
               summary?.repeatability ? Number(summary.repeatability.jointAgreementRate.toFixed(4)) : "",
               summary?.repeatability ? summary.repeatability.jointAgreementCount : "",
               summary?.repeatability ? summary.repeatability.totalRepeatPairs : "",
@@ -345,7 +343,8 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
         "Feature ID",
         "Material cost",
         "Perceived value",
-        "Raw model WTP",
+        "Raw model WTP (model units)",
+        "Raw model WTP (currency)",
         "Adjusted WTP",
         "Utility",
         "CI low",
@@ -363,6 +362,7 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
           result.featureId,
           result.materialCost,
           result.perceivedValue,
+          result.rawModelWtp ?? "",
           result.rawWtp ?? "",
           result.adjustedWtp ?? "",
           result.utility ?? "",
@@ -410,7 +410,11 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
         "Persona",
         "Estimator",
         "Money transform",
+        "Money scale",
         "Beta",
+        "Planned tasks",
+        "Answered tasks",
+        "Used in fit tasks",
         "Repeatability joint",
         "Repeatability joint matches",
         "Repeatability total pairs",
@@ -436,7 +440,11 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
         persona,
         summary?.estimator ?? "",
         summary?.moneyTransform ?? "",
+        summary?.moneyScale ?? "",
         summary?.beta ?? "",
+        summary?.plannedTaskCount ?? "",
+        summary?.answeredTaskCount ?? "",
+        summary?.usedInFitTaskCount ?? "",
         summary?.repeatability?.jointAgreementRate ?? "",
         summary?.repeatability?.jointAgreementCount ?? "",
         summary?.repeatability?.totalRepeatPairs ?? "",
@@ -567,12 +575,6 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
               </CardDescription>
             </div>
             <div className="flex gap-2">
-              <div className="mr-2 flex items-center gap-2 rounded-md border border-border-subtle px-3 py-1.5">
-                <Switch id="allow-negative-wtp" checked={allowNegativeWtp} onCheckedChange={setAllowNegativeWtp} />
-                <Label htmlFor="allow-negative-wtp" className="cursor-pointer text-xs">
-                  Allow negative WTP
-                </Label>
-              </div>
               <Button onClick={downloadResults} variant="outline" size="sm">
                 <Download className="mr-2 h-4 w-4" />
                 Export CSV
@@ -906,6 +908,7 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
                           <TableHead>Feature</TableHead>
                           <TableHead className="text-right">Material Cost</TableHead>
                           <TableHead className="text-right">Perceived / Adjusted WTP</TableHead>
+                          <TableHead className="text-right">Raw model WTP (model units)</TableHead>
                           <TableHead className="text-right">Raw Model WTP</TableHead>
                           <TableHead className="text-right">Utility</TableHead>
                           <TableHead className="text-right">95% CI</TableHead>
@@ -920,6 +923,9 @@ export const ResultsVisualization = ({ results, callLogs, summaries }: ResultsVi
                                 <TableCell>{result.featureName}</TableCell>
                                 <TableCell className="text-right">${result.materialCost.toFixed(2)}</TableCell>
                                 <TableCell className="text-right">${result.perceivedValue.toFixed(2)}</TableCell>
+                                <TableCell className="text-right">
+                                  {result.rawModelWtp != null ? result.rawModelWtp.toFixed(4) : "—"}
+                                </TableCell>
                                 <TableCell className="text-right">
                                   {result.rawWtp != null ? `$${result.rawWtp.toFixed(2)}` : "—"}
                                 </TableCell>

@@ -103,6 +103,7 @@ const stringifyPayload = (value: unknown, maxChars = 12_000): string => {
 };
 
 const formatClock = (seconds: number) => `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+const DEFAULT_MONEY_SCALE = 100;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -560,6 +561,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                 estimator: "legacy_score",
                 moneyTransform: "log1p",
                 beta: null,
+                moneyScale: DEFAULT_MONEY_SCALE,
                 designDiagnostics: estimatedPlan.designDiagnostics,
                 repeatability: {
                   totalRepeatPairs: 0,
@@ -570,6 +572,10 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                   worstAgreementRate: 0,
                   jointAgreementRate: 0,
                 },
+                plannedTaskCount: 0,
+                answeredTaskCount: 0,
+                usedInFitTaskCount: 0,
+                stopReason: "maxTasksReached",
                 failedTaskCount: 0,
                 totalTaskCount: 0,
                 failureRate: 0,
@@ -609,6 +615,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                   worstAgreementRate: 0,
                   jointAgreementRate: 0,
                 },
+                moneyScale: DEFAULT_MONEY_SCALE,
                 failedTaskCount: 0,
                 totalTaskCount: 0,
                 failureRate: 0,
@@ -845,7 +852,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                   ...row,
                   perceivedValue: Number(displayWtp.toFixed(2)),
                   rawWtp: Number(rawWtp.toFixed(2)),
-                  adjustedWtp: Number(rawWtp.toFixed(2)),
+                  adjustedWtp: Number(displayWtp.toFixed(2)),
                   displayWtp: Number(displayWtp.toFixed(2)),
                   ciLower95: Number(rawWtp.toFixed(2)),
                   ciUpper95: Number(rawWtp.toFixed(2)),
@@ -858,9 +865,13 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
               estimator: "legacy_score",
               moneyTransform: analysisSettings.moneyTransform,
               beta: null,
+              moneyScale: DEFAULT_MONEY_SCALE,
               designDiagnostics,
               repeatability,
+              plannedTaskCount: personaSets.length,
               answeredTaskCount: exposure.answeredTasks,
+              usedInFitTaskCount: exposure.answeredTasks,
+              stopReason: "maxTasksReached",
               moneySignal: exposure.moneySignal,
               failedTaskCount,
               totalTaskCount: responses.length,
@@ -890,6 +901,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
 
           const fit = fitBwsMnlMoney(personaSets, responses, engineFeatures, analysisPlan.vouchers, {
             transform: analysisSettings.moneyTransform,
+            moneyScale: DEFAULT_MONEY_SCALE,
             maxIters: 360,
             tolerance: 1e-6,
             learningRate: 0.03,
@@ -903,6 +915,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
             analysisSettings.bootstrapSamples,
             {
               transform: analysisSettings.moneyTransform,
+              moneyScale: DEFAULT_MONEY_SCALE,
               maxIters: 220,
               tolerance: 1e-5,
               learningRate: 0.035,
@@ -915,7 +928,8 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
           const perceivedValues = engineFeatures
             .map((feature) => {
               const utility = fit.utilityByFeature[feature.id] ?? 0;
-              const rawWtp = wtpFromUtility(utility, fit.beta, analysisSettings.moneyTransform);
+              const rawModelWtp = fit.rawWtpModelUnitsByFeature[feature.id] ?? 0;
+              const rawWtp = wtpFromUtility(utility, fit.beta, analysisSettings.moneyTransform, fit.moneyScale);
               const displayWtp = displayWtpFromRaw(rawWtp, false);
               const bootstrapStats = bootstrap.byFeature[feature.id];
               const ciLower95 = bootstrapStats?.p2_5 ?? rawWtp;
@@ -927,8 +941,9 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                 perceivedValue: Number(displayWtp.toFixed(2)),
                 netScore: Number(utility.toFixed(6)),
                 utility: Number(utility.toFixed(6)),
+                rawModelWtp: Number(rawModelWtp.toFixed(4)),
                 rawWtp: Number(rawWtp.toFixed(2)),
-                adjustedWtp: Number(rawWtp.toFixed(2)),
+                adjustedWtp: Number(displayWtp.toFixed(2)),
                 displayWtp: Number(displayWtp.toFixed(2)),
                 ciLower95: Number(ciLower95.toFixed(2)),
                 ciUpper95: Number(ciUpper95.toFixed(2)),
@@ -945,10 +960,14 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
             designMode: analysisPlan.designMode,
             estimator: "bws_mnl_money",
             moneyTransform: analysisSettings.moneyTransform,
+            moneyScale: fit.moneyScale,
             beta: fit.beta,
             designDiagnostics,
             repeatability,
+            plannedTaskCount: personaSets.length,
             answeredTaskCount: exposure.answeredTasks,
+            usedInFitTaskCount: fit.taskCount,
+            stopReason: "maxTasksReached",
             moneySignal: exposure.moneySignal,
             failedTaskCount: fit.failedTaskCount,
             totalTaskCount: responses.length,
@@ -959,6 +978,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                 row.featureId,
                 {
                   utility: row.utility ?? row.netScore,
+                  rawModelWtp: row.rawModelWtp,
                   rawWtp: row.rawWtp ?? row.perceivedValue,
                   adjustedWtp: row.adjustedWtp ?? row.perceivedValue,
                   ciLower95: row.ciLower95 ?? row.perceivedValue,
@@ -1106,12 +1126,13 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                 : "not_reached";
 
           personaResult.summary.stopReason = stopReason;
+          personaResult.summary.usedInFitTaskCount = lastFit?.taskCount ?? personaResult.summary.usedInFitTaskCount;
           personaResult.summary.stabilization = {
             enabled: stabilizationEnabled,
             targetRelativeHalfWidth: analysisSettings.stabilityTargetPercent / 100,
             topN: analysisSettings.stabilityTopN,
             maxTasks: analysisSettings.stabilityMaxTasks,
-            tasksUsed: personaResult.exposure.answeredTasks,
+            tasksUsed: lastFit?.taskCount ?? personaResult.exposure.answeredTasks,
             batchesAdded,
             isStable: stabilizationEnabled ? stabilitySatisfied : true,
             statusLabel,

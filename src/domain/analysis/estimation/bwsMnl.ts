@@ -8,7 +8,7 @@ import type {
   StabilityFeatureCheck,
   Voucher,
 } from "@/domain/analysis/engine";
-import { wtpFromUtility } from "../wtp.ts";
+import { wtpFromUtility, wtpFromUtilityModelUnits } from "../wtp.ts";
 
 type TaskObservation = {
   setId: string;
@@ -19,6 +19,7 @@ type TaskObservation = {
 
 export interface BwsMnlConfig {
   transform: MoneyTransform;
+  moneyScale?: number;
   maxIters?: number;
   tolerance?: number;
   learningRate?: number;
@@ -28,8 +29,10 @@ export interface BwsMnlConfig {
 export interface BwsMnlFitResult {
   estimator: "bws_mnl_money";
   transform: MoneyTransform;
+  moneyScale: number;
   beta: number;
   utilityByFeature: Record<string, number>;
+  rawWtpModelUnitsByFeature: Record<string, number>;
   rawWtpByFeature: Record<string, number>;
   converged: boolean;
   iterations: number;
@@ -57,6 +60,7 @@ interface TaskBuildResult {
 }
 
 const DEFAULT_CONFIG: Required<Omit<BwsMnlConfig, "transform">> = {
+  moneyScale: 100,
   maxIters: 300,
   tolerance: 1e-6,
   learningRate: 0.03,
@@ -104,14 +108,14 @@ const std = (values: number[], avg: number) => {
   return Math.sqrt(variance);
 };
 
-const moneyTransform = (amount: number, transform: MoneyTransform) => {
-  const safe = Math.max(0, amount);
+const moneyTransform = (amount: number, transform: MoneyTransform, moneyScale: number) => {
+  const safe = Math.max(0, amount) / Math.max(1e-8, moneyScale);
   if (transform === "linear") return safe;
   return Math.log1p(safe);
 };
 
-export const invertMoneyUtility = (utility: number, beta: number, transform: MoneyTransform) => {
-  return wtpFromUtility(utility, beta, transform);
+export const invertMoneyUtility = (utility: number, beta: number, transform: MoneyTransform, moneyScale = 100) => {
+  return wtpFromUtility(utility, beta, transform, moneyScale);
 };
 
 const buildTasks = (sets: MaxDiffSet[], responses: RawResponse[]): TaskBuildResult => {
@@ -159,23 +163,21 @@ const evaluateModel = (
   tasks: TaskObservation[],
   featureIds: string[],
   voucherAmountById: Map<string, number>,
-  transform: MoneyTransform
+  transform: MoneyTransform,
+  moneyScale: number
 ) => {
-  const baselineFeatureId = featureIds[0];
-  const utilityIndexByFeature = new Map<string, number>();
-  for (let i = 1; i < featureIds.length; i++) {
-    utilityIndexByFeature.set(featureIds[i], i - 1);
-  }
-  const logBetaIndex = Math.max(0, featureIds.length - 1);
+  const utilityIndexByFeature = new Map<string, number>(featureIds.map((id, index) => [id, index]));
+  const logBetaIndex = featureIds.length;
   const logBeta = params[logBetaIndex] ?? Math.log(0.2);
   const beta = Math.exp(clamp(logBeta, -12, 8));
+  const theta = featureIds.map((_, index) => params[index] ?? 0);
+  const thetaMean = mean(theta);
 
   const utilityForItem = (itemId: string) => {
-    if (itemId === baselineFeatureId) return 0;
     const featureParamIndex = utilityIndexByFeature.get(itemId);
-    if (featureParamIndex != null) return params[featureParamIndex] ?? 0;
+    if (featureParamIndex != null) return (params[featureParamIndex] ?? 0) - thetaMean;
     if (voucherAmountById.has(itemId)) {
-      return beta * moneyTransform(voucherAmountById.get(itemId) ?? 0, transform);
+      return beta * moneyTransform(voucherAmountById.get(itemId) ?? 0, transform, moneyScale);
     }
     return 0;
   };
@@ -224,6 +226,10 @@ const evaluateModel = (
 
       const featureParamIndex = utilityIndexByFeature.get(itemId);
       if (featureParamIndex != null) {
+        const shared = d / Math.max(1, featureIds.length);
+        for (let f = 0; f < featureIds.length; f++) {
+          gradient[f] -= shared;
+        }
         gradient[featureParamIndex] += d;
       }
 
@@ -250,7 +256,7 @@ const fitFromTasks = (
   }
 
   const voucherAmountById = new Map(vouchers.map((voucher) => [voucher.id, voucher.amount]));
-  const dimension = Math.max(1, featureIds.length - 1) + 1; // utilities (excluding baseline) + logBeta
+  const dimension = Math.max(1, featureIds.length) + 1; // all utilities + logBeta
   const logBetaIndex = dimension - 1;
   const params = new Array(dimension).fill(0);
   params[logBetaIndex] = Math.log(0.2);
@@ -274,7 +280,8 @@ const fitFromTasks = (
       tasks,
       featureIds,
       voucherAmountById,
-      merged.transform
+      merged.transform,
+      merged.moneyScale
     );
     const nll = -logLikelihood;
     if (!Number.isFinite(nll)) break;
@@ -309,22 +316,28 @@ const fitFromTasks = (
     params[logBetaIndex] = clamp(params[logBetaIndex], -12, 8);
   }
 
-  const finalEval = evaluateModel(bestParams, tasks, featureIds, voucherAmountById, merged.transform);
+  const finalEval = evaluateModel(bestParams, tasks, featureIds, voucherAmountById, merged.transform, merged.moneyScale);
   const beta = finalEval.beta;
   const utilityByFeature: Record<string, number> = {};
   const rawWtpByFeature: Record<string, number> = {};
+  const rawWtpModelUnitsByFeature: Record<string, number> = {};
+  const theta = featureIds.map((_, i) => bestParams[i] ?? 0);
+  const thetaMean = mean(theta);
   for (let i = 0; i < featureIds.length; i++) {
     const featureId = featureIds[i];
-    const utility = i === 0 ? 0 : bestParams[i - 1] ?? 0;
+    const utility = (bestParams[i] ?? 0) - thetaMean;
     utilityByFeature[featureId] = utility;
-    rawWtpByFeature[featureId] = invertMoneyUtility(utility, beta, merged.transform);
+    rawWtpModelUnitsByFeature[featureId] = wtpFromUtilityModelUnits(utility, beta, merged.transform);
+    rawWtpByFeature[featureId] = invertMoneyUtility(utility, beta, merged.transform, merged.moneyScale);
   }
 
   return {
     estimator: "bws_mnl_money" as const,
     transform: merged.transform,
+    moneyScale: merged.moneyScale,
     beta,
     utilityByFeature,
+    rawWtpModelUnitsByFeature,
     rawWtpByFeature,
     converged,
     iterations: finalIteration,
@@ -345,8 +358,10 @@ export const fitBwsMnlMoney = (
     return {
       estimator: "bws_mnl_money",
       transform: config.transform,
+      moneyScale: config.moneyScale ?? DEFAULT_CONFIG.moneyScale,
       beta: 0.2,
       utilityByFeature: {},
+      rawWtpModelUnitsByFeature: {},
       rawWtpByFeature: {},
       converged: false,
       iterations: 0,
