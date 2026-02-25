@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -87,7 +87,7 @@ interface MaxDiffAnalysisProps {
 }
 
 type LiveCallCard = MaxDiffCallLog & {
-  phase: 'active' | 'fading';
+  phase: 'active';
 };
 
 const estimateTokens = (text: string) => Math.ceil(text.length / 4);
@@ -327,8 +327,6 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
   const [isApiConsoleOpen, setIsApiConsoleOpen] = useState(false);
   const { toast } = useToast();
 
-  const liveCardTimersRef = useRef<number[]>([]);
-
   const { personasById, getPersonaName } = usePersonas();
   const { vehiclesById } = useVehicles();
 
@@ -343,29 +341,10 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
   );
   const totalSets = estimatedPlan.maxDiffSets.length;
 
-  const clearLiveCardTimers = () => {
-    liveCardTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
-    liveCardTimersRef.current = [];
-  };
-
   const enqueueLiveCall = (entry: MaxDiffCallLog) => {
     setLiveCallCards((previous) => {
       const fresh: LiveCallCard = { ...entry, phase: 'active' };
-      if (previous.length < 3) {
-        return [...previous, fresh];
-      }
-
-      const [oldest, ...rest] = previous;
-      const fadedOldest: LiveCallCard = { ...oldest, phase: 'fading' };
-      const next = [fadedOldest, ...rest, fresh];
-      const staleId = oldest.id;
-
-      const timerId = window.setTimeout(() => {
-        setLiveCallCards((current) => current.filter((item) => item.id !== staleId));
-      }, 700);
-      liveCardTimersRef.current.push(timerId);
-
-      return next;
+      return [fresh, ...previous].slice(0, 4);
     });
   };
 
@@ -393,7 +372,6 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
       window.removeEventListener(ANALYSIS_SETTINGS_UPDATED_EVENT, updateAnalysisSettings);
       window.removeEventListener('storage', updateModelConfig);
       window.removeEventListener('storage', updateAnalysisSettings);
-      clearLiveCardTimers();
     };
   }, []);
 
@@ -500,7 +478,6 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
     setEta(0);
     setApiCallLogs([]);
     setLiveCallCards([]);
-    clearLiveCardTimers();
 
     if (!analysisSettings.showProgressUpdates) {
       setAnalysisStatus(isSimulationMode ? 'Running simulated analysis...' : 'Running analysis...');
@@ -1631,21 +1608,27 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
               <p className="text-sm text-muted-foreground">{analysisStatus}</p>
             </div>
 
+            {analysisSettings.showProgressUpdates && (
+              <div className="text-center text-xs text-muted-foreground">
+                ⏱ Elapsed: <strong>{formatClock(elapsedTime)}</strong> · ETA: <strong>{formatClock(eta)}</strong>
+              </div>
+            )}
+
             <div className="space-y-2" id="insights-console">
               <div className="flex items-center justify-between">
-                <p className="text-sm font-medium">Live API calls (last 3)</p>
-                <p className="text-xs text-muted-foreground">Newest call appears at the bottom</p>
+                <p className="text-sm font-medium">Live API calls (last 4)</p>
+                <p className="text-xs text-muted-foreground">Newest call appears at the top</p>
               </div>
-              <div className="space-y-2 rounded-lg border border-border-subtle bg-muted/20 p-3">
+              <div className="space-y-2 rounded-lg border border-border-subtle bg-muted/20 p-3 min-h-[19rem]">
                 {liveCallCards.length === 0 ? (
                   <p className="text-xs text-muted-foreground">Waiting for the first response…</p>
                 ) : (
-                  liveCallCards.map((call) => (
+                  [...liveCallCards, ...new Array(Math.max(0, 4 - liveCallCards.length)).fill(null)].map((call, index) => (
+                    call ? (
                     <div
                       key={call.id}
                       className={cn(
                         'analysis-live-card rounded-md border border-border-subtle bg-card/90 p-3 shadow-subtle',
-                        call.phase === 'fading' && 'analysis-live-card-fade',
                         call.status === 'error' && 'border-destructive/40 bg-destructive/5',
                       )}
                     >
@@ -1663,16 +1646,13 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                         Least: <span className="font-medium text-data-negative">{call.leastValued}</span>
                       </p>
                     </div>
+                    ) : (
+                      <div key={`live-call-slot-${index}`} className="rounded-md border border-dashed border-border-subtle/70 bg-card/50 p-3" />
+                    )
                   ))
                 )}
               </div>
             </div>
-
-            {analysisSettings.showProgressUpdates && (
-              <div className="text-center text-xs text-muted-foreground">
-                ⏱ Elapsed: <strong>{formatClock(elapsedTime)}</strong> · ETA: <strong>{formatClock(eta)}</strong>
-              </div>
-            )}
 
             {progress === 100 && (
               <div className="text-center pt-2">
