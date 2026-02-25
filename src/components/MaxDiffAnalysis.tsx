@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -87,7 +87,7 @@ interface MaxDiffAnalysisProps {
 }
 
 type LiveCallCard = MaxDiffCallLog & {
-  phase: 'active' | 'fading';
+  phase: 'active';
 };
 
 const estimateTokens = (text: string) => Math.ceil(text.length / 4);
@@ -103,6 +103,7 @@ const stringifyPayload = (value: unknown, maxChars = 12_000): string => {
 };
 
 const formatClock = (seconds: number) => `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+const DEFAULT_MONEY_SCALE = 100;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -326,8 +327,6 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
   const [isApiConsoleOpen, setIsApiConsoleOpen] = useState(false);
   const { toast } = useToast();
 
-  const liveCardTimersRef = useRef<number[]>([]);
-
   const { personasById, getPersonaName } = usePersonas();
   const { vehiclesById } = useVehicles();
 
@@ -342,29 +341,10 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
   );
   const totalSets = estimatedPlan.maxDiffSets.length;
 
-  const clearLiveCardTimers = () => {
-    liveCardTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
-    liveCardTimersRef.current = [];
-  };
-
   const enqueueLiveCall = (entry: MaxDiffCallLog) => {
     setLiveCallCards((previous) => {
       const fresh: LiveCallCard = { ...entry, phase: 'active' };
-      if (previous.length < 3) {
-        return [...previous, fresh];
-      }
-
-      const [oldest, ...rest] = previous;
-      const fadedOldest: LiveCallCard = { ...oldest, phase: 'fading' };
-      const next = [fadedOldest, ...rest, fresh];
-      const staleId = oldest.id;
-
-      const timerId = window.setTimeout(() => {
-        setLiveCallCards((current) => current.filter((item) => item.id !== staleId));
-      }, 700);
-      liveCardTimersRef.current.push(timerId);
-
-      return next;
+      return [fresh, ...previous].slice(0, 4);
     });
   };
 
@@ -392,7 +372,6 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
       window.removeEventListener(ANALYSIS_SETTINGS_UPDATED_EVENT, updateAnalysisSettings);
       window.removeEventListener('storage', updateModelConfig);
       window.removeEventListener('storage', updateAnalysisSettings);
-      clearLiveCardTimers();
     };
   }, []);
 
@@ -499,7 +478,6 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
     setEta(0);
     setApiCallLogs([]);
     setLiveCallCards([]);
-    clearLiveCardTimers();
 
     if (!analysisSettings.showProgressUpdates) {
       setAnalysisStatus(isSimulationMode ? 'Running simulated analysis...' : 'Running analysis...');
@@ -560,6 +538,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                 estimator: "legacy_score",
                 moneyTransform: "log1p",
                 beta: null,
+                moneyScale: DEFAULT_MONEY_SCALE,
                 designDiagnostics: estimatedPlan.designDiagnostics,
                 repeatability: {
                   totalRepeatPairs: 0,
@@ -570,6 +549,10 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                   worstAgreementRate: 0,
                   jointAgreementRate: 0,
                 },
+                plannedTaskCount: 0,
+                answeredTaskCount: 0,
+                usedInFitTaskCount: 0,
+                stopReason: "maxTasksReached",
                 failedTaskCount: 0,
                 totalTaskCount: 0,
                 failureRate: 0,
@@ -609,6 +592,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                   worstAgreementRate: 0,
                   jointAgreementRate: 0,
                 },
+                moneyScale: DEFAULT_MONEY_SCALE,
                 failedTaskCount: 0,
                 totalTaskCount: 0,
                 failureRate: 0,
@@ -845,7 +829,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                   ...row,
                   perceivedValue: Number(displayWtp.toFixed(2)),
                   rawWtp: Number(rawWtp.toFixed(2)),
-                  adjustedWtp: Number(rawWtp.toFixed(2)),
+                  adjustedWtp: Number(displayWtp.toFixed(2)),
                   displayWtp: Number(displayWtp.toFixed(2)),
                   ciLower95: Number(rawWtp.toFixed(2)),
                   ciUpper95: Number(rawWtp.toFixed(2)),
@@ -858,9 +842,13 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
               estimator: "legacy_score",
               moneyTransform: analysisSettings.moneyTransform,
               beta: null,
+              moneyScale: DEFAULT_MONEY_SCALE,
               designDiagnostics,
               repeatability,
+              plannedTaskCount: personaSets.length,
               answeredTaskCount: exposure.answeredTasks,
+              usedInFitTaskCount: exposure.answeredTasks,
+              stopReason: "maxTasksReached",
               moneySignal: exposure.moneySignal,
               failedTaskCount,
               totalTaskCount: responses.length,
@@ -890,6 +878,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
 
           const fit = fitBwsMnlMoney(personaSets, responses, engineFeatures, analysisPlan.vouchers, {
             transform: analysisSettings.moneyTransform,
+            moneyScale: DEFAULT_MONEY_SCALE,
             maxIters: 360,
             tolerance: 1e-6,
             learningRate: 0.03,
@@ -903,6 +892,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
             analysisSettings.bootstrapSamples,
             {
               transform: analysisSettings.moneyTransform,
+              moneyScale: DEFAULT_MONEY_SCALE,
               maxIters: 220,
               tolerance: 1e-5,
               learningRate: 0.035,
@@ -915,7 +905,8 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
           const perceivedValues = engineFeatures
             .map((feature) => {
               const utility = fit.utilityByFeature[feature.id] ?? 0;
-              const rawWtp = wtpFromUtility(utility, fit.beta, analysisSettings.moneyTransform);
+              const rawModelWtp = fit.rawWtpModelUnitsByFeature[feature.id] ?? 0;
+              const rawWtp = wtpFromUtility(utility, fit.beta, analysisSettings.moneyTransform, fit.moneyScale);
               const displayWtp = displayWtpFromRaw(rawWtp, false);
               const bootstrapStats = bootstrap.byFeature[feature.id];
               const ciLower95 = bootstrapStats?.p2_5 ?? rawWtp;
@@ -927,8 +918,9 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                 perceivedValue: Number(displayWtp.toFixed(2)),
                 netScore: Number(utility.toFixed(6)),
                 utility: Number(utility.toFixed(6)),
+                rawModelWtp: Number(rawModelWtp.toFixed(4)),
                 rawWtp: Number(rawWtp.toFixed(2)),
-                adjustedWtp: Number(rawWtp.toFixed(2)),
+                adjustedWtp: Number(displayWtp.toFixed(2)),
                 displayWtp: Number(displayWtp.toFixed(2)),
                 ciLower95: Number(ciLower95.toFixed(2)),
                 ciUpper95: Number(ciUpper95.toFixed(2)),
@@ -945,10 +937,14 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
             designMode: analysisPlan.designMode,
             estimator: "bws_mnl_money",
             moneyTransform: analysisSettings.moneyTransform,
+            moneyScale: fit.moneyScale,
             beta: fit.beta,
             designDiagnostics,
             repeatability,
+            plannedTaskCount: personaSets.length,
             answeredTaskCount: exposure.answeredTasks,
+            usedInFitTaskCount: fit.taskCount,
+            stopReason: "maxTasksReached",
             moneySignal: exposure.moneySignal,
             failedTaskCount: fit.failedTaskCount,
             totalTaskCount: responses.length,
@@ -959,6 +955,7 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                 row.featureId,
                 {
                   utility: row.utility ?? row.netScore,
+                  rawModelWtp: row.rawModelWtp,
                   rawWtp: row.rawWtp ?? row.perceivedValue,
                   adjustedWtp: row.adjustedWtp ?? row.perceivedValue,
                   ciLower95: row.ciLower95 ?? row.perceivedValue,
@@ -1106,12 +1103,13 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                 : "not_reached";
 
           personaResult.summary.stopReason = stopReason;
+          personaResult.summary.usedInFitTaskCount = lastFit?.taskCount ?? personaResult.summary.usedInFitTaskCount;
           personaResult.summary.stabilization = {
             enabled: stabilizationEnabled,
             targetRelativeHalfWidth: analysisSettings.stabilityTargetPercent / 100,
             topN: analysisSettings.stabilityTopN,
             maxTasks: analysisSettings.stabilityMaxTasks,
-            tasksUsed: personaResult.exposure.answeredTasks,
+            tasksUsed: lastFit?.taskCount ?? personaResult.exposure.answeredTasks,
             batchesAdded,
             isStable: stabilizationEnabled ? stabilitySatisfied : true,
             statusLabel,
@@ -1610,21 +1608,27 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
               <p className="text-sm text-muted-foreground">{analysisStatus}</p>
             </div>
 
+            {analysisSettings.showProgressUpdates && (
+              <div className="text-center text-xs text-muted-foreground">
+                ⏱ Elapsed: <strong>{formatClock(elapsedTime)}</strong> · ETA: <strong>{formatClock(eta)}</strong>
+              </div>
+            )}
+
             <div className="space-y-2" id="insights-console">
               <div className="flex items-center justify-between">
-                <p className="text-sm font-medium">Live API calls (last 3)</p>
-                <p className="text-xs text-muted-foreground">Newest call appears at the bottom</p>
+                <p className="text-sm font-medium">Live API calls (last 4)</p>
+                <p className="text-xs text-muted-foreground">Newest call appears at the top</p>
               </div>
-              <div className="space-y-2 rounded-lg border border-border-subtle bg-muted/20 p-3">
+              <div className="space-y-2 rounded-lg border border-border-subtle bg-muted/20 p-3 min-h-[19rem]">
                 {liveCallCards.length === 0 ? (
                   <p className="text-xs text-muted-foreground">Waiting for the first response…</p>
                 ) : (
-                  liveCallCards.map((call) => (
+                  [...liveCallCards, ...new Array(Math.max(0, 4 - liveCallCards.length)).fill(null)].map((call, index) => (
+                    call ? (
                     <div
                       key={call.id}
                       className={cn(
                         'analysis-live-card rounded-md border border-border-subtle bg-card/90 p-3 shadow-subtle',
-                        call.phase === 'fading' && 'analysis-live-card-fade',
                         call.status === 'error' && 'border-destructive/40 bg-destructive/5',
                       )}
                     >
@@ -1642,16 +1646,13 @@ export const MaxDiffAnalysis = ({ features, selectedPersonas, selectedVehicle, o
                         Least: <span className="font-medium text-data-negative">{call.leastValued}</span>
                       </p>
                     </div>
+                    ) : (
+                      <div key={`live-call-slot-${index}`} className="rounded-md border border-dashed border-border-subtle/70 bg-card/50 p-3" />
+                    )
                   ))
                 )}
               </div>
             </div>
-
-            {analysisSettings.showProgressUpdates && (
-              <div className="text-center text-xs text-muted-foreground">
-                ⏱ Elapsed: <strong>{formatClock(elapsedTime)}</strong> · ETA: <strong>{formatClock(eta)}</strong>
-              </div>
-            )}
 
             {progress === 100 && (
               <div className="text-center pt-2">

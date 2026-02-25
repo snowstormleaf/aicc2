@@ -38,7 +38,7 @@ describe("BWS MNL estimator", () => {
       { id: "v3", amount: 220, description: "$220 off" },
     ];
     const trueUtility = {
-      f1: 0,
+      f1: -0.2,
       f2: 0.95,
       f3: 0.4,
       f4: -0.3,
@@ -93,6 +93,7 @@ describe("BWS MNL estimator", () => {
     assert.ok(fit.rawWtpByFeature.f2 > fit.rawWtpByFeature.f3);
     assert.ok(fit.rawWtpByFeature.f3 > fit.rawWtpByFeature.f1);
     assert.ok(fit.rawWtpByFeature.f1 > fit.rawWtpByFeature.f4);
+    assert.ok(Object.values(fit.utilityByFeature).every((utility) => utility !== 0));
 
     const estimatedOrdering = ["f2", "f3", "f1", "f4"];
     const sortedByEstimated = Object.entries(fit.utilityByFeature)
@@ -101,4 +102,3 @@ describe("BWS MNL estimator", () => {
     assert.deepEqual(sortedByEstimated.slice(0, 4), estimatedOrdering);
   });
 });
-

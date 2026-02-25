@@ -54,6 +54,7 @@ export interface PerceivedValue {
   netScore: number; // raw score before scaling
   utility?: number;
   rawWtp?: number;
+  rawModelWtp?: number;
   adjustedWtp?: number;
   displayWtp?: number;
   ciLower95?: number;
@@ -171,6 +172,7 @@ export interface CalibrationResult {
 
 export interface FeatureEstimationSummary {
   utility: number;
+  rawModelWtp?: number;
   rawWtp: number;
   adjustedWtp: number;
   ciLower95: number;
@@ -185,9 +187,12 @@ export interface PersonaAnalysisSummary {
   estimator: EstimatorMode;
   moneyTransform: MoneyTransform;
   beta: number | null;
+  moneyScale?: number;
   designDiagnostics: MaxDiffDesignDiagnostics | null;
   repeatability: RepeatabilityMetrics;
   answeredTaskCount?: number;
+  plannedTaskCount?: number;
+  usedInFitTaskCount?: number;
   failedTaskCount: number;
   totalTaskCount: number;
   failureRate: number;

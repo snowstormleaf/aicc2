@@ -5,9 +5,10 @@ import { utilityFromWtp, wtpFromUtility } from "../src/domain/analysis/wtp.ts";
 describe("WTP utility conversion", () => {
   it("inverts log1p money utility back to dollars with expm1", () => {
     const beta = 0.2;
-    const targetDollars = 100;
-    const utility = beta * Math.log1p(targetDollars);
-    const recovered = wtpFromUtility(utility, beta, "log1p");
+    const targetDollars = 316;
+    const moneyScale = 100;
+    const utility = beta * Math.log1p(targetDollars / moneyScale);
+    const recovered = wtpFromUtility(utility, beta, "log1p", moneyScale);
     assert.ok(Math.abs(recovered - targetDollars) < 1e-6);
   });
 
